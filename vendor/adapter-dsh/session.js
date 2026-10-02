@@ -1,0 +1,595 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { ApplyTransaction, BackgroundStore, MediaServerController, buildHostApplyPayload, defaultDataRoot, isLocalBackgroundSource, resolveSessionBundledThemes, resolveBackgroundImagePath, } from "../core/index.js";
+import { DshHostApplier, dshTrustedOrigins, normalizeDshBaseUrl } from "./bridge.js";
+import { DSH_HOST_DESCRIPTOR } from "./host-descriptor.js";
+import { acquireDshInjectorLock } from "./injector-lock.js";
+import { ensureBridgeToken } from "./token.js";
+import { trayHandoffRequested } from "./tray-handoff.js";
+export class DshSession {
+    descriptor = DSH_HOST_DESCRIPTOR;
+    cdpPort = null;
+    dataRoot;
+    verifyDeadlineMs;
+    pollMs;
+    honorTrayHandoff;
+    baseUrl;
+    store;
+    media;
+    host = null;
+    releaseLock = null;
+    watchTimer = null;
+    handoffTimer = null;
+    watchTask = null;
+    stopTask = null;
+    activeOperations = new Set();
+    closed = false;
+    userBusy = false;
+    onError;
+    onStatus;
+    lastWatchError = "";
+    fishMode = false;
+    videoMuted = true;
+    backgroundTone = "auto";
+    activeThemeId = null;
+    lastProgressWriteAt = 0;
+    lastProgressWriteSec = -1;
+    progressWriteInFlight = false;
+    constructor(opts = {}) {
+        this.dataRoot = opts.dataRoot ?? defaultDataRoot();
+        this.verifyDeadlineMs = opts.verifyDeadlineMs ?? 30_000;
+        this.pollMs = opts.pollMs ?? 2_000;
+        this.honorTrayHandoff = opts.honorTrayHandoff !== false;
+        this.baseUrl = normalizeDshBaseUrl(opts.baseUrl ?? "http://127.0.0.1:3080");
+        this.store = new BackgroundStore({
+            root: this.dataRoot,
+            bundledThemes: resolveSessionBundledThemes({
+                enabled: opts.bundledGallery,
+                imagePath: opts.bundledGalleryImagePath,
+                searchRoots: [
+                    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.."),
+                    process.cwd(),
+                ],
+            }),
+        });
+        this.media = new MediaServerController({
+            enabled: true,
+            trustedOrigins: dshTrustedOrigins(this.baseUrl),
+        });
+        this.onError = opts.onError ?? null;
+        this.onStatus = opts.onStatus ?? null;
+    }
+    get isBusy() {
+        return this.userBusy;
+    }
+    get isOpen() {
+        return !this.closed && this.releaseLock != null;
+    }
+    get isHostReady() {
+        return (this.host?.activeSessionCount ?? 0) > 0;
+    }
+    async start() {
+        if (this.closed)
+            throw new Error("Session already stopped");
+        if (this.releaseLock)
+            throw new Error("Session already started");
+        await this.store.init();
+        this.releaseLock = await acquireDshInjectorLock(this.dataRoot);
+        try {
+            const token = await ensureBridgeToken(this.dataRoot);
+            this.host = new DshHostApplier({
+                baseUrl: this.baseUrl.href,
+                token,
+                pollMs: Math.min(250, Math.max(50, Math.floor(this.pollMs / 4))),
+            });
+        }
+        catch (error) {
+            await this.releaseLock().catch(() => { });
+            this.releaseLock = null;
+            throw error;
+        }
+        this.startWatchLoop();
+        if (this.honorTrayHandoff) {
+            this.startHandoffLoop();
+            void this.yieldToTrayIfRequested();
+        }
+        void this.watchOnce();
+        return { port: this.bridgePort() };
+    }
+    async apply(input) {
+        return this.trackOperation(this.applyInternal(input));
+    }
+    async applyAndSaveTheme(input, name) {
+        const result = await this.trackOperation(this.applyInternal(input, name));
+        if (!result.ok)
+            return result;
+        if (!result.theme) {
+            return {
+                ok: false,
+                error: "Theme apply completed without a saved theme.",
+                rolledBack: false,
+            };
+        }
+        return { ...result, theme: result.theme };
+    }
+    async applyInternal(input, themeName) {
+        if (!this.releaseLock || this.closed || !this.host) {
+            throw new Error("Session is not started");
+        }
+        if (this.userBusy) {
+            return {
+                ok: false,
+                error: "Another background apply is already in progress.",
+                rolledBack: false,
+            };
+        }
+        this.userBusy = true;
+        try {
+            // The startup/watch probe may already have opened active/background.json
+            // before userBusy became true. On Windows that read can overlap the
+            // transaction's atomic active-directory rename and cause EPERM. Drain
+            // that one read before beginning any apply mutation; later watch ticks
+            // observe userBusy and do not reapply.
+            const inFlightWatch = this.watchTask;
+            if (inFlightWatch)
+                await inFlightWatch;
+            const tx = new ApplyTransaction({
+                store: this.store,
+                media: this.media,
+                host: this.host,
+                includeImageDataUrl: false,
+                verifyDeadlineMs: this.verifyDeadlineMs,
+                offline: false,
+            });
+            const saved = { theme: null };
+            const result = await tx.run(input, themeName
+                ? {
+                    beforeFinalize: async () => {
+                        // Persist the initial seek so a restore before the periodic
+                        // progress writer runs still resumes at the requested position.
+                        let videoPositionSec = null;
+                        if (input.type === "video") {
+                            if (this.host) {
+                                try {
+                                    const position = await this.host.getPlaybackPosition();
+                                    if (position.ok &&
+                                        position.hasVideo &&
+                                        Number.isFinite(position.currentTime)) {
+                                        videoPositionSec = position.currentTime;
+                                    }
+                                }
+                                catch {
+                                    /* fall back to input.startAt below */
+                                }
+                            }
+                            const startAt = typeof input.startAt === "number" && Number.isFinite(input.startAt)
+                                ? input.startAt
+                                : null;
+                            if (videoPositionSec == null && startAt != null) {
+                                videoPositionSec = Math.max(0, startAt);
+                            }
+                        }
+                        saved.theme = await this.store.saveCurrentTheme(themeName, {
+                            ...(videoPositionSec != null ? { videoPositionSec } : {}),
+                        });
+                    },
+                    onRollback: async () => {
+                        if (saved.theme) {
+                            await this.store.deleteSavedTheme(saved.theme.id);
+                        }
+                    },
+                }
+                : undefined);
+            if (result.ok) {
+                // Retain the saved theme id for image themes too: status.themeId marks
+                // the current selection in the console, and video-position tracking is
+                // already gated on hasVideo / "Not a video theme" downstream.
+                this.activeThemeId = saved.theme?.id ?? null;
+                this.lastProgressWriteSec = -1;
+                if (input.type === "clear") {
+                    this.fishMode = false;
+                }
+                else if (this.fishMode) {
+                    await this.host.setFishMode(true).catch(() => null);
+                }
+                if (!this.videoMuted || input.type === "video") {
+                    await this.host.setMuted(this.videoMuted).catch(() => null);
+                }
+                if (input.type === "image" && input.effects?.preset === "infernal") {
+                    this.backgroundTone = "dark";
+                }
+                else if (input.type === "image" && input.effects?.preset === "internal") {
+                    this.backgroundTone = "light";
+                }
+                await this.host.setBackgroundTone(this.backgroundTone).catch(() => null);
+            }
+            return result.ok && saved.theme ? { ...result, theme: saved.theme } : result;
+        }
+        finally {
+            this.userBusy = false;
+        }
+    }
+    async reapply() {
+        return this.trackOperation(this.reapplyInternal());
+    }
+    async reapplyInternal() {
+        if (!this.releaseLock || this.closed || !this.host) {
+            throw new Error("Session is not started");
+        }
+        if (this.userBusy) {
+            return {
+                ok: false,
+                error: "Another background apply is already in progress.",
+                rolledBack: false,
+            };
+        }
+        this.userBusy = true;
+        let stagedImage = null;
+        let stagedVideo = null;
+        try {
+            const manifest = await this.store.readActiveManifest();
+            let resumeAt = null;
+            if (manifest.background?.type === "video") {
+                try {
+                    const position = await this.host.getPlaybackPosition();
+                    if (position.ok && position.hasVideo && Number.isFinite(position.currentTime)) {
+                        resumeAt = Math.max(0, position.currentTime);
+                    }
+                }
+                catch {
+                    /* Fall back to the bound saved theme below. */
+                }
+                if (resumeAt == null && this.activeThemeId) {
+                    resumeAt = await this.store.getSavedThemeVideoPosition(this.activeThemeId);
+                }
+            }
+            if (manifest.background) {
+                const imagePath = resolveBackgroundImagePath(this.store.paths.activeDir, manifest.background);
+                if (!imagePath)
+                    throw new Error("Background has no image source.");
+                stagedImage = await this.media.stage(imagePath, {
+                    validation: manifest.background.type === "image" && isLocalBackgroundSource(manifest.background)
+                        ? "fast"
+                        : "full",
+                });
+                if (manifest.background.type === "video") {
+                    const runtimeVideoPath = await this.store.prepareRuntimeVideo(manifest);
+                    if (!runtimeVideoPath) {
+                        throw new Error("DSH video reapply requires a detached runtime copy.");
+                    }
+                    stagedVideo = await this.media.stage(runtimeVideoPath, {
+                        validation: isLocalBackgroundSource(manifest.background) ? "fast" : "full",
+                    });
+                }
+            }
+            const staged = { image: stagedImage, video: stagedVideo };
+            const payload = await buildHostApplyPayload(this.store, manifest, staged, "", undefined, { includeImageDataUrl: false });
+            if (payload.video && resumeAt != null)
+                payload.video.startAt = resumeAt;
+            await this.host.apply(payload);
+            const verify = await this.host.verify({
+                generation: manifest.generation,
+                media: manifest.background?.type ?? "clear",
+            }, { deadlineMs: this.verifyDeadlineMs });
+            if (verify.status !== "pass") {
+                await this.media.abort(stagedVideo);
+                await this.media.abort(stagedImage);
+                stagedVideo = null;
+                stagedImage = null;
+                return {
+                    ok: false,
+                    error: `Live verify did not pass (${verify.status}): ${verify.reason}`,
+                    rolledBack: false,
+                };
+            }
+            await this.media.commit(staged);
+            stagedVideo = null;
+            stagedImage = null;
+            if (!manifest.background) {
+                this.fishMode = false;
+                this.activeThemeId = null;
+            }
+            else if (this.fishMode) {
+                await this.host.setFishMode(true).catch(() => null);
+            }
+            await this.host.setMuted(this.videoMuted).catch(() => null);
+            await this.host.setBackgroundTone(this.backgroundTone).catch(() => null);
+            return {
+                ok: true,
+                generation: manifest.generation,
+                mode: manifest.background?.type ?? "clear",
+            };
+        }
+        catch (error) {
+            await this.media.abort(stagedVideo);
+            await this.media.abort(stagedImage);
+            return {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+                rolledBack: false,
+            };
+        }
+        finally {
+            this.userBusy = false;
+        }
+    }
+    async status() {
+        const manifest = await this.store.readActiveManifest();
+        if (this.host)
+            await this.host.status().catch(() => null);
+        return {
+            host: this.descriptor,
+            port: this.bridgePort(),
+            sessions: this.host?.activeSessionCount ?? 0,
+            manifest,
+            mediaServer: this.media.activeImage?.url ?? this.media.activeVideo?.url ?? null,
+            fish: this.fishMode,
+            muted: this.videoMuted,
+            tone: this.backgroundTone,
+            themeId: this.activeThemeId,
+        };
+    }
+    async saveCurrentTheme(name) {
+        let videoPositionSec = null;
+        if (this.host) {
+            try {
+                const position = await this.host.getPlaybackPosition();
+                if (position.ok && position.hasVideo && Number.isFinite(position.currentTime)) {
+                    videoPositionSec = position.currentTime;
+                }
+            }
+            catch {
+                /* Save without a resume position when no browser client is available. */
+            }
+        }
+        const theme = await this.store.saveCurrentTheme(name, { videoPositionSec });
+        this.activeThemeId = theme.id;
+        this.lastProgressWriteSec = -1;
+        return theme;
+    }
+    async listSavedThemes() {
+        return this.store.listSavedThemes();
+    }
+    async deleteSavedTheme(themeId) {
+        const deleted = await this.store.deleteSavedTheme(themeId);
+        if (deleted && this.activeThemeId === themeId) {
+            this.activeThemeId = null;
+            this.lastProgressWriteSec = -1;
+        }
+        return deleted;
+    }
+    async useSavedTheme(themeId) {
+        try {
+            const saved = await this.store.loadSavedTheme(themeId);
+            const result = await this.apply(saved.input);
+            if (result.ok) {
+                this.activeThemeId = saved.themeId;
+                this.lastProgressWriteSec = -1;
+            }
+            return result;
+        }
+        catch (error) {
+            return {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+                rolledBack: false,
+            };
+        }
+    }
+    async setFishMode(enabled) {
+        if (!this.releaseLock || this.closed || !this.host) {
+            return { ok: false, fish: this.fishMode, sessions: 0, error: "Session is not started" };
+        }
+        const want = Boolean(enabled);
+        if (want) {
+            const manifest = await this.store.readActiveManifest();
+            if (!manifest.background) {
+                this.fishMode = false;
+                return {
+                    ok: false,
+                    fish: false,
+                    sessions: 0,
+                    error: "No active background. Apply an image or video first.",
+                };
+            }
+        }
+        this.fishMode = want;
+        try {
+            const result = await this.host.setFishMode(want);
+            if (result.ok)
+                this.fishMode = result.fish;
+            else if (!want)
+                this.fishMode = false;
+            return result;
+        }
+        catch (error) {
+            return {
+                ok: false,
+                fish: this.fishMode,
+                sessions: 0,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+    async setMuted(muted) {
+        if (!this.releaseLock || this.closed || !this.host) {
+            return {
+                ok: false,
+                muted: this.videoMuted,
+                blocked: false,
+                sessions: 0,
+                error: "Session is not started",
+            };
+        }
+        this.videoMuted = Boolean(muted);
+        try {
+            const result = await this.host.setMuted(this.videoMuted);
+            if (result.ok)
+                this.videoMuted = result.muted;
+            return result;
+        }
+        catch (error) {
+            return {
+                ok: false,
+                muted: this.videoMuted,
+                blocked: false,
+                sessions: 0,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+    async setBackgroundTone(tone) {
+        if (!this.releaseLock || this.closed || !this.host) {
+            return { ok: false, tone: this.backgroundTone, sessions: 0, error: "Session is not started" };
+        }
+        this.backgroundTone = tone === "light" || tone === "auto" ? tone : "dark";
+        try {
+            const result = await this.host.setBackgroundTone(this.backgroundTone);
+            if (result.ok)
+                this.backgroundTone = result.tone;
+            return result;
+        }
+        catch (error) {
+            return {
+                ok: false,
+                tone: this.backgroundTone,
+                sessions: 0,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+    async stop() {
+        if (this.stopTask)
+            return this.stopTask;
+        this.stopTask = this.stopExclusive();
+        return this.stopTask;
+    }
+    async stopExclusive() {
+        this.closed = true;
+        if (this.watchTimer)
+            clearInterval(this.watchTimer);
+        this.watchTimer = null;
+        if (this.handoffTimer)
+            clearInterval(this.handoffTimer);
+        this.handoffTimer = null;
+        await Promise.allSettled([this.watchTask, ...this.activeOperations].filter((value) => Boolean(value)));
+        if (this.fishMode && this.host) {
+            await this.host.setFishMode(false).catch(() => null);
+            this.fishMode = false;
+        }
+        await this.media.close().catch(() => { });
+        if (this.releaseLock)
+            await this.releaseLock().catch(() => { });
+        this.releaseLock = null;
+        this.host = null;
+    }
+    trackOperation(operation) {
+        this.activeOperations.add(operation);
+        void operation.finally(() => this.activeOperations.delete(operation)).catch(() => { });
+        return operation;
+    }
+    bridgePort() {
+        if (this.baseUrl.port)
+            return Number(this.baseUrl.port);
+        return 80;
+    }
+    startWatchLoop() {
+        this.watchTimer = setInterval(() => void this.watchOnce(), this.pollMs);
+        this.watchTimer.unref?.();
+    }
+    startHandoffLoop() {
+        this.handoffTimer = setInterval(() => void this.yieldToTrayIfRequested(), 250);
+        this.handoffTimer.unref?.();
+    }
+    async yieldToTrayIfRequested() {
+        if (this.closed || this.stopTask)
+            return;
+        if (!(await trayHandoffRequested(this.dataRoot)))
+            return;
+        this.onStatus?.("beautiCode 托盘正在接管，正在释放本机会话。");
+        await this.stop();
+    }
+    async watchOnce() {
+        if (this.closed || !this.host || this.watchTask)
+            return;
+        const task = (async () => {
+            try {
+                const [status, manifest] = await Promise.all([
+                    this.host.status(),
+                    this.store.readActiveManifest(),
+                ]);
+                this.lastWatchError = "";
+                const media = manifest.background?.type ?? "clear";
+                // Media URLs are process-local. After the tray/session host restarts,
+                // the DSH page may still report the same generation while pointing at
+                // a dead loopback server, so force one reapply when local handles are
+                // absent.
+                const localMediaMissing = media === "image"
+                    ? this.media.activeImage == null
+                    : media === "video"
+                        ? this.media.activeImage == null || this.media.activeVideo == null
+                        : false;
+                const stale = status.connectedClients > 0 &&
+                    (status.current?.generation !== manifest.generation ||
+                        status.current.media !== media ||
+                        localMediaMissing);
+                if (stale && !this.userBusy) {
+                    this.onStatus?.("DeepSeek Harness 已连接，正在恢复当前背景。");
+                    const result = await this.reapply();
+                    if (!result.ok)
+                        throw new Error(result.error);
+                }
+                await this.persistBoundThemeProgress();
+            }
+            catch (error) {
+                const err = error instanceof Error ? error : new Error(String(error));
+                if (err.message !== this.lastWatchError) {
+                    this.lastWatchError = err.message;
+                    this.onError?.(err);
+                }
+            }
+        })();
+        this.watchTask = task;
+        await task.finally(() => {
+            if (this.watchTask === task)
+                this.watchTask = null;
+        });
+    }
+    async persistBoundThemeProgress() {
+        if (!this.activeThemeId || !this.host || this.progressWriteInFlight || this.userBusy) {
+            return;
+        }
+        const now = Date.now();
+        if (now - this.lastProgressWriteAt < 2_000)
+            return;
+        this.progressWriteInFlight = true;
+        try {
+            const position = await this.host.getPlaybackPosition();
+            if (!position.ok || !position.hasVideo)
+                return;
+            let seconds = Number(position.currentTime);
+            if (!Number.isFinite(seconds) || seconds < 0)
+                return;
+            if (position.duration > 0 && seconds >= position.duration - 0.25)
+                seconds = 0;
+            if (this.lastProgressWriteSec >= 0 &&
+                Math.abs(seconds - this.lastProgressWriteSec) < 0.5 &&
+                !(seconds === 0 && this.lastProgressWriteSec !== 0)) {
+                this.lastProgressWriteAt = now;
+                return;
+            }
+            const result = await this.store.updateSavedThemeVideoPosition(this.activeThemeId, seconds);
+            if (result.ok) {
+                this.lastProgressWriteAt = now;
+                this.lastProgressWriteSec = result.positionSec ?? seconds;
+            }
+            else if (result.error === "Saved theme not found.") {
+                this.activeThemeId = null;
+            }
+        }
+        finally {
+            this.progressWriteInFlight = false;
+        }
+    }
+}
+//# sourceMappingURL=session.js.map

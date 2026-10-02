@@ -1,0 +1,52 @@
+{
+  "name": "dsh-bg",
+  "version": "5.3.0",
+  "description": "Image/video backgrounds for DeepSeek Harness — local-only fork with no network access.",
+  "type": "module",
+  "main": "./index.mjs",
+  "bin": {
+    "dsh-bg": "bin/dsh-bg"
+  },
+  "exports": {
+    ".": {
+      "import": "./index.mjs"
+    }
+  },
+  "files": [
+    "index.mjs",
+    "browser-injection.mjs",
+    "transport.js",
+    "client.js",
+    "console.js",
+    "framing.js",
+    "atmosphere.js",
+    "presets.mjs",
+    "agent.mjs",
+    "control-client.mjs",
+    "host-apply.mjs",
+    "ui-host.mjs",
+    "cli.js",
+    "bin/dsh-bg",
+    "cordis.patch.yml",
+    "NOTICE",
+    "vendor",
+    "themes"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "deepseek-harness",
+    "background",
+    "wallpaper"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

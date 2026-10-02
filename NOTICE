@@ -1,0 +1,14 @@
+dsh-bg is a local-only derivative of beautiCode's DeepSeek Harness bridge
+(package `beauticode-dsh`, https://github.com/starsstreaming/beautiCode),
+MIT licensed. The original copyright and LICENSE file are retained.
+
+Changes made in this fork:
+  - removed the online skin centre (`gallery.js`, `gallery-host.mjs`,
+    `skin-center.json` and the /__beauticode/ui/gallery/* routes), so the
+    plugin makes no outbound network requests at all;
+  - removed the hard-coded third-party catalogue URL it shipped with;
+  - added `framing.js`, which provides background pan/zoom framing and
+    sidebar/interface transparency controls;
+  - rebranded the package, plugin id and installer from beauticode-* to dsh-bg.
+
+The bundled theme in `themes/internal-beyond` keeps its own NOTICE.md.

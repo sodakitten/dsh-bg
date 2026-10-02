@@ -1,0 +1,5 @@
+{
+  "name": "@beauticode/adapter-dsh",
+  "type": "module",
+  "main": "./index.js"
+}
