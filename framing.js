@@ -1661,28 +1661,57 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
   }
 
   function startPageObserver() {
-    const observer = new MutationObserver(() => {
+    // The observer spans the whole document, so it fires for every node the app
+    // inserts anywhere — including every chunk of a streaming reply. Its callback
+    // runs three functions that measure geometry: tagComposerSurface walks every
+    // descendant of the composer area calling getBoundingClientRect, and the two
+    // sidebar taggers do the same per button. Forced synchronous layout at that rate
+    // is what made the window visibly stutter while a reply was streaming.
+    //
+    // All three are cosmetic — they move the frost and the button material onto the
+    // right elements — so they do not need to run on every mutation. One pass per
+    // frame would not have been enough either, because a streaming reply mutates on
+    // essentially every frame; a minimum interval is what bounds the work. The
+    // trailing pass guarantees the settled state is always the tagged one.
+    const COOLDOWN_MS = 200;
+    let pending = false;
+    let lastRun = 0;
+    let timer = null;
+
+    const run = () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      pending = false;
+      lastRun = Date.now();
       ensureBlocks();
       tagCaptionProbe();
       tagComposerSurface();
       tagSidebarAction();
       tagSidebarAccount();
+    };
+
+    const onMutation = () => {
+      if (pending) return;
+      pending = true;
+      const elapsed = Date.now() - lastRun;
+      if (elapsed >= COOLDOWN_MS) requestAnimationFrame(run);
+      else timer = setTimeout(run, COOLDOWN_MS - elapsed);
+    };
+
+    const observer = new MutationObserver(onMutation);
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      // Composer state switches are class/attribute only. Watching childList
+      // alone meant tagComposerSurface never re-ran when the input entered its
+      // selection state, so the tag stayed on the old element and the card lost
+      // its frost — which read as the input going transparent again.
+      attributes: true,
+      attributeFilter: ["class", "data-state", "hidden", "aria-expanded", "aria-hidden"],
     });
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-    // Composer state switches are class/attribute only. Watching childList
-    // alone meant tagComposerSurface never re-ran when the input entered its
-    // selection state, so the tag stayed on the old element and the card lost
-    // its frost — which read as the input going transparent again.
-    attributes: true,
-    attributeFilter: ["class", "data-state", "hidden", "aria-expanded", "aria-hidden"],
-  });
-    ensureBlocks();
-    tagCaptionProbe();
-    tagComposerSurface();
-    tagSidebarAction();
-    tagSidebarAccount();
+    run();
     // The picker needs the saved-theme list, which arrives with the identity.
     void loadCarousel();
   }
