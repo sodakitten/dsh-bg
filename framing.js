@@ -1584,10 +1584,21 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
     }
     if (candidates.length === 0) return;
     const widest = Math.max(...candidates.map((c) => c.width));
-    const next = new Set();
-    for (const c of candidates) {
-      if (c.width >= widest * 0.6) next.add(c.el);
-    }
+    const qualifying = candidates.filter((c) => c.width >= widest * 0.6);
+
+    // Exactly one element carries the frost.
+    //
+    // backdrop-filter nests: with the tag on a container AND on a same-width wrapper
+    // inside it, what shows through is blurred twice under two 55% surfaces, and a
+    // glyph behind it reads as doubled — the overlapping text. It also creates a
+    // containing block, so position:fixed descendants get re-anchored to the tagged
+    // element, which is the shifting. Keeping only the outermost qualifying element
+    // covers the card once with nothing nested inside it carrying a second filter.
+    const outermost = qualifying.filter(
+      (c) => !qualifying.some((other) => other !== c && other.el.contains(c.el)),
+    );
+    const chosen = outermost.reduce((a, b) => (a && a.width >= b.width ? a : b));
+    const next = new Set([chosen.el]);
     for (const el of document.querySelectorAll('[data-bgc-composer="1"]')) {
       if (!next.has(el)) delete el.dataset.bgcComposer;
     }
