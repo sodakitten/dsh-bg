@@ -1568,11 +1568,29 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
    * seat roughly twice that wide. Buttons, chips and option rows sit inside the
    * card, so they are narrower and drop out on their own.
    */
+  // The element currently carrying the frost. Kept until it stops being valid, so
+  // the tag cannot hop between the card and a wrapper inside it on every re-scan.
+  let frostedEl = null;
+
   function tagComposerSurface() {
     const area =
       document.querySelector('[class*="_composerSeat"]') ??
       document.querySelector('[class*="_composerStack"]');
     if (!area) return;
+
+    // Keep the current target while it is still valid. Re-deciding on every mutation
+    // made the tag hop between the card and a same-width wrapper inside it; each hop
+    // removed and re-added backdrop-filter, which repaints and re-anchors fixed
+    // descendants — the shuddering when the model picker opens. It also skips the
+    // measurement below, which is where the forced layout came from.
+    if (
+      frostedEl &&
+      frostedEl.isConnected &&
+      area.contains(frostedEl) &&
+      frostedEl.dataset.bgcComposer === "1"
+    ) {
+      return;
+    }
     const candidates = [];
     for (const el of area.querySelectorAll("*")) {
       const rect = el.getBoundingClientRect();
@@ -1604,6 +1622,7 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
     }
     for (const el of next) {
       if (el.dataset.bgcComposer !== "1") el.dataset.bgcComposer = "1";
+      frostedEl = el;
     }
   }
 
