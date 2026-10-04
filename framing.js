@@ -658,6 +658,27 @@ html[data-bc-active="true"]:has(#root [data-phase="settling"]) body{
   background-color:color-mix(in srgb, rgb(var(--bgc-rgb-base,248,250,252)) 55%, transparent) !important;
 }
 
+/* Context-compaction notices. The trajectory module paints them with
+   --dsw-alias-bg-module-platform, which is color-mix(tone, --bc-surface-mix,
+   transparent) — beautiCode's stock 36% outside the active/settling phases, and
+   86% x density inside them. Either way the transcript behind the row reads through
+   its label. Same treatment as the composer: a strong blur plus a plate.
+
+   Literal tones rather than var(--bgc-rgb-base,...): that variable is only declared
+   inside the active/settling blocks, so outside them its light-tone fallback would
+   paint a white plate over a dark theme.
+
+   :not([class*="_compactedS"]) excludes the module's own _compactedSummary — two
+   nested elements each carrying a backdrop-filter would blur the backdrop twice. */
+html[data-bc-active="true"] [class*="_compacted"]:not([class*="_compactedS"]){
+  -webkit-backdrop-filter:blur(28px);
+  backdrop-filter:blur(28px);
+  background-color:color-mix(in srgb, rgb(17,20,27) 55%, transparent) !important;
+}
+html[data-bc-resolved-tone="light"][data-bc-active="true"] [class*="_compacted"]:not([class*="_compactedS"]){
+  background-color:color-mix(in srgb, rgb(248,250,252) 55%, transparent) !important;
+}
+
 /* The 背景阴影 reset button was never styled — console.js defines
    .bc-blur-reset but no .bc-dim-reset, so it renders as a default browser
    button next to a styled one. Same declaration, class swapped. */
