@@ -35,6 +35,24 @@
 #beauticode-console-page .bc-pill{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:72px;height:36px;padding:0 14px;border:0;border-radius:18px;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;font-weight:400;line-height:22px}
 #beauticode-console-page .bc-pill:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 #beauticode-console-page .bc-pill.on::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-business-primary)}
+/* Boolean pills render as switches. State comes from aria-pressed, so nothing in the
+   markup changes. min-width has to be overridden because the pill reserves room for its
+   word, and the word is hidden by making it transparent rather than by removing it — the
+   button keeps its accessible name. */
+#beauticode-console-page .bc-pill[aria-pressed]:not([data-bgc-carousel="order"]){position:relative;width:44px;min-width:44px;height:24px;padding:0;border-radius:999px;background:var(--dsw-alias-border-l3);color:transparent;overflow:hidden;transition:background .16s var(--ds-ease-in-out)}
+#beauticode-console-page .bc-pill[aria-pressed]:not([data-bgc-carousel="order"]):hover:not(:disabled){background:var(--dsw-alias-border-l4)}
+#beauticode-console-page .bc-pill[aria-pressed="true"]:not([data-bgc-carousel="order"]){background:var(--dsw-alias-state-business-primary)}
+#beauticode-console-page .bc-pill[aria-pressed="true"]:not([data-bgc-carousel="order"]):hover:not(:disabled){background:var(--dsw-alias-state-business-primary)}
+#beauticode-console-page .bc-pill[aria-pressed]:not([data-bgc-carousel="order"])::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv1);transition:transform .16s var(--ds-ease-in-out)}
+#beauticode-console-page .bc-pill[aria-pressed="true"]:not([data-bgc-carousel="order"])::after{transform:translateX(20px)}
+/* the old on-dot belongs to the pill word this replaces */
+#beauticode-console-page .bc-pill[aria-pressed]:not([data-bgc-carousel="order"]).on::before{display:none}
+
+/* Drawers get a chevron that turns a quarter turn when open, so the state of the
+   collapsible is readable without opening the panel's own controls. */
+#beauticode-console-page .bc-pill[aria-expanded]::before{content:"";width:7px;height:7px;margin-right:2px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .16s var(--ds-ease-in-out)}
+#beauticode-console-page .bc-pill[aria-expanded="true"]::before{transform:rotate(45deg)}
+
 #beauticode-console-page .bc-link{cursor:pointer;height:auto;padding:0;border:0;border-radius:6px;background:0 0;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;text-decoration:underline;text-underline-offset:3px}
 #beauticode-console-page .bc-link:hover{color:var(--dsw-alias-label-primary)}
 #beauticode-console-page .bc-slider{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:18px;background:var(--dsw-alias-bg-module-platform)}
