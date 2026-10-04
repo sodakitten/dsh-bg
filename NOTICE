@@ -7,6 +7,11 @@ Changes made in this fork:
     `skin-center.json` and the /__beauticode/ui/gallery/* routes), so the
     plugin makes no outbound network requests at all;
   - removed the hard-coded third-party catalogue URL it shipped with;
+  - removed beautiCode's [class*="_fade"]{display:none} rule: in this DSH build
+    "_fade" marks scroll-edge masks, and ChatGroupSeat carries fadeTop/fadeBottom
+    on the same div as its collapsible body, so the rule hid the whole reasoning
+    block whenever its scroll edges changed, which is continuously while
+    reasoning streams;
   - added `framing.js`, which provides background pan/zoom framing and
     sidebar/interface transparency controls;
   - rebranded the package, plugin id and installer from beauticode-* to dsh-bg.
