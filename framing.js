@@ -1268,6 +1268,10 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
         status.textContent = total
           ? '轮播中 · 下一张：第 ' + (cursor + 1) + ' / ' + total + ' 张'
           : '轮播中';
+        // While a group is active the carousel owns the background: picking one from
+        // the list goes through the same useTheme path and does not stop it, so the
+        // next tick replaces the pick. That is intended, but nothing said so.
+        status.textContent += '（手动选择会在下一张被覆盖）';
       }
     }
 
@@ -1621,6 +1625,7 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
   // The element currently carrying the frost. Kept until it stops being valid, so
   // the tag cannot hop between the card and a wrapper inside it on every re-scan.
   let frostedEl = null;
+  let frostedSize = 0;
 
   function tagComposerSurface() {
     const area =
@@ -1637,7 +1642,11 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       frostedEl &&
       frostedEl.isConnected &&
       area.contains(frostedEl) &&
-      frostedEl.dataset.bgcComposer === "1"
+      frostedEl.dataset.bgcComposer === "1" &&
+      // The composer stack survives a question with its children removed, so
+      // containment alone kept the frost on an empty node. A shrinking subtree is
+      // that signal, and counting children costs no layout.
+      frostedEl.querySelectorAll("*").length >= frostedSize
     ) {
       return;
     }
@@ -1673,6 +1682,9 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
     for (const el of next) {
       if (el.dataset.bgcComposer !== "1") el.dataset.bgcComposer = "1";
       frostedEl = el;
+      // Recorded so a later pass can tell whether this node still holds the card:
+      // when DSH asks a question the composer stack stays in the DOM but empties.
+      frostedSize = el.querySelectorAll("*").length;
     }
   }
 
