@@ -1625,7 +1625,7 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
   // The element currently carrying the frost. Kept until it stops being valid, so
   // the tag cannot hop between the card and a wrapper inside it on every re-scan.
   let frostedEl = null;
-  let frostedSize = 0;
+  let lastAreaSize = -1;
 
   function tagComposerSurface() {
     const area =
@@ -1638,18 +1638,29 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
     // removed and re-added backdrop-filter, which repaints and re-anchors fixed
     // descendants — the shuddering when the model picker opens. It also skips the
     // measurement below, which is where the forced layout came from.
+    // The gate is the AREA, not the target.
+    //
+    // Gating on the target kept the frost on a node that was no longer the card. The
+    // composer stack survives a question with its children removed, and entering the
+    // selection state swaps which element is the card — both are recorded elsewhere in
+    // this file. Either way the card lost its frost, which reads as transparent.
+    //
+    // Counting the area's descendants is a walk, not a layout read, so the gate stays
+    // as cheap as it was. An unchanged count means nothing in the area changed shape
+    // and the current choice stands. A changed count means re-decide — and 5.3.3's
+    // outermost-only rule makes re-deciding return one stable element, so this no
+    // longer hops.
+    const areaSize = area.querySelectorAll("*").length;
     if (
       frostedEl &&
       frostedEl.isConnected &&
       area.contains(frostedEl) &&
       frostedEl.dataset.bgcComposer === "1" &&
-      // The composer stack survives a question with its children removed, so
-      // containment alone kept the frost on an empty node. A shrinking subtree is
-      // that signal, and counting children costs no layout.
-      frostedEl.querySelectorAll("*").length >= frostedSize
+      areaSize === lastAreaSize
     ) {
       return;
     }
+    lastAreaSize = areaSize;
     const candidates = [];
     for (const el of area.querySelectorAll("*")) {
       const rect = el.getBoundingClientRect();
@@ -1682,9 +1693,6 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
     for (const el of next) {
       if (el.dataset.bgcComposer !== "1") el.dataset.bgcComposer = "1";
       frostedEl = el;
-      // Recorded so a later pass can tell whether this node still holds the card:
-      // when DSH asks a question the composer stack stays in the DOM but empties.
-      frostedSize = el.querySelectorAll("*").length;
     }
   }
 
