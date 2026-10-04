@@ -119,6 +119,50 @@ dsh plugin --profile desktop add file:<解压路径>\dsh-bg
 同一批探针里 `_sidebarCol` 只有 **1 个**，可以这么用；`_frame` 不行。
 判断标准是"另一半是否唯一"，不是"我这次是否匹配上了"。
 
+### 同一类错误在上游代码里也有一个
+
+`client.js` 里带着一条：
+
+```css
+html[data-bc-active="true"] [class*="_fade"]{display:none!important}
+```
+
+作者以为 `_fade` 是"淡入装饰"。构建产物里含它的类只有 5 个，而且**分成两种东西**：
+
+```
+_fadeTop / _fadeBottom   滚动边缘遮罩，由标记加在【滚动元素自己】身上
+_fade                    独立装饰层（会话列表底部那 24px 渐变）
+```
+
+`ChatGroupSeat`（可折叠的推理分组）把 `fadeTop` / `fadeBottom` 加在**承载展开体的同一个 `div`** 上 ——
+于是 `display:none` 在滚动边缘变化时把整个推理块隐藏掉 ✓ 而推理流式输出期间这个标志一直在翻 ✓
+表现为**思考块不停地开合闪屏** ✓
+
+修法是**缩小范围**而不是删掉：
+
+```css
+[class*="_fade"]:not([class*="_fadeTop"]):not([class*="_fadeBottom"]){display:none!important}
+```
+
+我第一版直接删了整条规则 —— 结果连那个装饰层也回来了 ✓ 侧栏底部冒出一个白色渐变方块 ✓
+**"误杀"的正确处理是收窄条件，不是取消规则。**
+
+### 关于背景磨砂边缘那圈亮边
+
+`filter: blur()` 会**采样元素边界之外** ✓ 而背景图是满屏铺满的 ✓
+于是最外圈像素混合到透明 ✓ 背后的页面底色（白）透出来 ✓ 成为细细一圈亮边 ✓
+
+这是 `filter: blur` 的固有行为 ✓ **不是故障** ✓ 但如果不想看到 ✓ 让模糊层**溢出视口**即可：
+
+```css
+html[data-bc-gallery="true"] #beauticode-gallery-bg img{
+  filter:blur(var(--bc-bg-blur,0px));
+  transform:scale(1.06);   /* 把淡出的那一圈推到视口外 */
+}
+```
+
+（模糊半径越大，需要的溢出越多 ✓ 所以按最大半径给余量 ✓）
+
 ### 裁切为什么能跟着轮播走
 
 轮播调用 `actions.useTheme` / `actions.applyPreset` —— 就是面板点击时调的同一批动作。
