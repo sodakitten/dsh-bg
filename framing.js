@@ -115,6 +115,9 @@
       // Default on: matching the two columns is the sane look, and the writer
       // only ever built the mismatched one because nothing could change it.
       sidebarFollow: raw.sidebarFollow !== false,
+      // Default off: the edge fill is opt-in, so the wallpaper paints exactly as
+      // before until it is asked for.
+      edgeFill: raw.edgeFill === true,
       density: Number.isFinite(density)
         ? Math.min(DENSITY_MAX, Math.max(DENSITY_MIN, density))
         : DENSITY_DEFAULT,
@@ -166,6 +169,8 @@
     if (settings.sidebarFollow) root.dataset.bgcSidebar = "follow";
     else delete root.dataset.bgcSidebar;
     root.style.setProperty("--bgc-ui", settings.density.toFixed(3));
+    if (settings.edgeFill) root.dataset.bgcEdge = "fill";
+    else delete root.dataset.bgcEdge;
 
   }
 
@@ -667,6 +672,30 @@ html[data-bc-active="true"]:has(#root [data-phase="settling"]) body{
 html[data-bc-gallery="true"] #beauticode-gallery-bg img{
   filter:blur(var(--bc-bg-blur,0px));
 }
+
+/* Opt-in: take the blur off the wallpaper itself and put it on a full-viewport
+   backdrop layer above it.
+
+   filter:blur() samples beyond the element, so a full-bleed image fades to
+   transparent in its outer pixels and the page's own background shows through —
+   a thin rim that reads white on a light theme and black on a dark one. A
+   backdrop-filter layer has no image edge of its own: its backdrop is the
+   composited content behind it.
+
+   z-index:1 sits above the <img> and below the ::after that carries the dim
+   overlay. Off by default, and a no-op while 背景磨砂 is 0. */
+html[data-bc-gallery="true"][data-bgc-edge="fill"] #beauticode-gallery-bg img{
+  filter:none;
+}
+html[data-bc-gallery="true"][data-bgc-edge="fill"] #beauticode-gallery-bg::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:1;
+  pointer-events:none;
+  -webkit-backdrop-filter:blur(var(--bc-bg-blur,0px));
+  backdrop-filter:blur(var(--bc-bg-blur,0px));
+}
 html[data-bc-gallery="true"] #beauticode-gallery-bg::after{
   content:"";
   position:absolute;
@@ -907,6 +936,7 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
 
   let uiBlock = null;
   let sidebarButton = null;
+  let edgeButton = null;
   let densitySlider = null;
   let densityValue = null;
 
@@ -926,6 +956,11 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       sidebarButton.classList.toggle("on", settings.sidebarFollow);
       sidebarButton.setAttribute("aria-pressed", settings.sidebarFollow ? "true" : "false");
     }
+    if (edgeButton) {
+      edgeButton.textContent = settings.edgeFill ? "已开" : "已关";
+      edgeButton.classList.toggle("on", settings.edgeFill);
+      edgeButton.setAttribute("aria-pressed", settings.edgeFill ? "true" : "false");
+    }
     if (densitySlider) {
       const scaled = Math.round(settings.density * 100);
       if (Number(densitySlider.value) !== scaled) densitySlider.value = String(scaled);
@@ -943,6 +978,12 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       '<span class="bc-row-desc">左栏改用和右栏同一层透明度，图片不再被挡掉一块</span>' +
       "</div>" +
       '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-bgc-act="sidebar" aria-pressed="true">已开</button></div>' +
+      "</div>" +
+      '<div class="bc-row"><div class="bc-row-text">' +
+      '<span class="bc-row-title">磨砂边缘缝合</span>' +
+      '<span class="bc-row-desc">模糊改由上层背板承担，窗口四边不再透出底色；只在背景磨砂大于 0 时有区别</span>' +
+      "</div>" +
+      '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-bgc-act="edge" aria-pressed="false">已关</button></div>' +
       "</div>" +
       '<div class="bc-row"><div class="bc-row-text">' +
       '<span class="bc-row-title">工作时浓度</span>' +
@@ -992,11 +1033,19 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-bgc-act="reload">刷新</button></div></div>';
 
     sidebarButton = el.querySelector('[data-bgc-act="sidebar"]');
+    edgeButton = el.querySelector('[data-bgc-act="edge"]');
     densitySlider = el.querySelector(".bgc-range");
     densityValue = el.querySelector(".bgc-value");
 
     sidebarButton.addEventListener("click", () => {
       settings.sidebarFollow = !settings.sidebarFollow;
+      applySettings();
+      writeSettings();
+      syncTransparencyControls();
+    });
+
+    edgeButton.addEventListener("click", () => {
+      settings.edgeFill = !settings.edgeFill;
       applySettings();
       writeSettings();
       syncTransparencyControls();

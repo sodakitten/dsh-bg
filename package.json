@@ -1,6 +1,6 @@
 {
   "name": "dsh-bg",
-  "version": "5.4.0",
+  "version": "5.5.0",
   "description": "Image/video backgrounds for DeepSeek Harness — local-only fork with no network access.",
   "type": "module",
   "main": "./index.mjs",
