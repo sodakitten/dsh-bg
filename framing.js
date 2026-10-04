@@ -678,6 +678,23 @@ html[data-bc-resolved-tone="light"][data-bc-active="true"] body{
   --dsw-specific-menu:color-mix(in srgb, rgb(248,249,250) 94%, transparent) !important;
 }
 
+/* The plate MenuSurface actually paints. It sits on an inner .material layer at
+   --dsw-menu-surface-fill (58% light / 45% dark) and leans on backdrop-filter for the
+   rest — but that blur is a no-op on Windows: the surface is isolated (isolation:
+   isolate) and the opaque .backing element the primitive uses to give Chromium
+   something to blur exists only under html[data-platform='darwin']. With nothing to
+   sample, the previous message stays sharp behind the menu.
+
+   So the plate is raised to the value DSH already uses for its other menu token
+   (--dsw-specific-menu is #f8f9faf0). The rules above cover the modules that consume
+   that token directly; this covers MenuSurface, which is the input-trigger popup. */
+html[data-bc-active="true"] body{
+  --dsw-menu-surface-fill:color-mix(in srgb, rgb(48,49,54) 94%, transparent) !important;
+}
+html[data-bc-resolved-tone="light"][data-bc-active="true"] body{
+  --dsw-menu-surface-fill:color-mix(in srgb, rgb(248,249,250) 94%, transparent) !important;
+}
+
 /* Context-compaction notices. The trajectory module paints them with
    --dsw-alias-bg-module-platform, which is color-mix(tone, --bc-surface-mix,
    transparent) — beautiCode's stock 36% outside the active/settling phases, and
