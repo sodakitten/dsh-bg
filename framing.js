@@ -658,6 +658,26 @@ html[data-bc-active="true"]:has(#root [data-phase="settling"]) body{
   background-color:color-mix(in srgb, rgb(var(--bgc-rgb-base,248,250,252)) 55%, transparent) !important;
 }
 
+/* Dropdown menus. DSH defines --dsw-specific-menu for them, with a near-opaque
+   fallback (#f8f9faf0). beautiCode redirects it to var(--dsw-alias-bg-layer-3) — its
+   own comment in client.js says so — which puts menus on the panel tier,
+   color-mix(tone, --bc-surface-mix, transparent). Outside the active/settling phases
+   --bc-surface-mix is beautiCode's stock 36%, and the menu module carries no
+   backdrop-filter at all, so the popup is a 36% plate with sharp text behind it.
+
+   Menus are transient surfaces over content, which is why DSH's own value is
+   near-opaque, so the plate is restored rather than frosted — at 94% a blur would have
+   nothing left to hide.
+
+   Scoped to this token rather than --dsw-alias-bg-layer-3, which is shared with other
+   surfaces. Per beautiCode's own note, this token is the menus. */
+html[data-bc-active="true"] body{
+  --dsw-specific-menu:color-mix(in srgb, rgb(48,49,54) 94%, transparent) !important;
+}
+html[data-bc-resolved-tone="light"][data-bc-active="true"] body{
+  --dsw-specific-menu:color-mix(in srgb, rgb(248,249,250) 94%, transparent) !important;
+}
+
 /* Context-compaction notices. The trajectory module paints them with
    --dsw-alias-bg-module-platform, which is color-mix(tone, --bc-surface-mix,
    transparent) — beautiCode's stock 36% outside the active/settling phases, and
