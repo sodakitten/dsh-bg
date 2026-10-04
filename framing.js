@@ -115,9 +115,10 @@
       // Default on: matching the two columns is the sane look, and the writer
       // only ever built the mismatched one because nothing could change it.
       sidebarFollow: raw.sidebarFollow !== false,
-      // Default off: the edge fill is opt-in, so the wallpaper paints exactly as
-      // before until it is asked for.
-      edgeFill: raw.edgeFill === true,
+      // Default on: the edge fill is what stops the page background showing through
+      // as a rim around the wallpaper. Same shape as sidebarFollow — only an explicit
+      // false turns it off.
+      edgeFill: raw.edgeFill !== false,
       density: Number.isFinite(density)
         ? Math.min(DENSITY_MAX, Math.max(DENSITY_MIN, density))
         : DENSITY_DEFAULT,

@@ -150,18 +150,36 @@ _fade                    独立装饰层（会话列表底部那 24px 渐变）
 ### 关于背景磨砂边缘那圈亮边
 
 `filter: blur()` 会**采样元素边界之外** ✓ 而背景图是满屏铺满的 ✓
-于是最外圈像素混合到透明 ✓ 背后的页面底色（白）透出来 ✓ 成为细细一圈亮边 ✓
+于是最外圈像素混合到透明 ✓ 背后的页面底色透出来 ✓ 成为窗口四边细细一圈亮边 ✓
 
-这是 `filter: blur` 的固有行为 ✓ **不是故障** ✓ 但如果不想看到 ✓ 让模糊层**溢出视口**即可：
+**那圈颜色跟着主题变**（亮色主题是白 ✓ 深色主题是黑 ✓）这一点本身就排除了"模糊自带颜色"的解释 ✓
+只可能是底色透出 ✓ —— 用户的两次观察正好互相证明了这个机制 ✓
+
+**修法：把模糊从壁纸本身搬到上层满屏背板** ✓（默认开 ✓ 面板里可关 ✓）
 
 ```css
-html[data-bc-gallery="true"] #beauticode-gallery-bg img{
-  filter:blur(var(--bc-bg-blur,0px));
-  transform:scale(1.06);   /* 把淡出的那一圈推到视口外 */
+html[data-bc-gallery="true"][data-bgc-edge="fill"] #beauticode-gallery-bg img{filter:none}
+html[data-bc-gallery="true"][data-bgc-edge="fill"] #beauticode-gallery-bg::before{
+  content:"";position:absolute;inset:0;z-index:1;pointer-events:none;
+  backdrop-filter:blur(var(--bc-bg-blur,0px))
 }
 ```
 
-（模糊半径越大，需要的溢出越多 ✓ 所以按最大半径给余量 ✓）
+背板模糊**没有自己的图像边界** ✓ 它采样的是背后已合成的内容 ✓ 所以不会淡出 ✓
+`z-index:1` 夹在图片与承载暗化层的 `::after`（`z-index:2`）之间 ✓
+`pointer-events:none` 保证不挡交互 ✓
+
+**被否掉的方案，记下来免得再走**：
+
+| 方案 | 结果 |
+|---|---|
+| `transform:scale(1.06)` | 有效 ✓ 但会多裁 3% ✗ 用户不接受 ✓ |
+| 负 inset / 超尺寸 | 和上一条**等价** ✗ 换个写法不会更省 ✓ |
+| SVG `edgeMode="duplicate"` | 规范写明的正解 ✓ 但半径要 JS 同步 ✗ 作为备选 ✓ |
+
+**一条值得记的判断**：我在实测前**不敢承诺**上层背板方案 ✗ ——
+理论上背板会被视口裁剪 ✓ 但 Chromium 把背板当纹理模糊 ✓ 纹理自身也有边界 ✗
+**实测结果是成立** ✓ —— 所以现在的默认值是实测出来的 ✓ 不是推理出来的 ✓
 
 ### 裁切为什么能跟着轮播走
 
