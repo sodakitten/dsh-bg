@@ -210,11 +210,20 @@ html[data-bc-bg-blur="true"] #beauticode-bg-stage .beauticode-media-slot video{
 }
 @media (prefers-reduced-motion:reduce){#beauticode-bg-stage .beauticode-media-slot,#beauticode-bg-stage .beauticode-media-slot img,#beauticode-bg-stage .beauticode-media-slot video{transition:none!important}}
 html[data-bc-active="true"] #root{position:relative;z-index:1;background:transparent!important}
-/* Removed: [class*="_fade"]{display:none}. In this DSH build the only classes
-   containing _fade are scroll-edge masks, and ChatGroupSeat puts fadeTop/fadeBottom
-   on the SAME div as the collapsible body it belongs to. display:none therefore
-   removed the whole reasoning block whenever its scroll edges changed, which happens
-   continuously while reasoning streams — the block appearing to open and close. */
+/* Scoped, not removed. "_fade" names five classes in this build, and the suffix
+   separates two different things:
+
+     _fadeTop / _fadeBottom   scroll-edge masks, applied BY THE MARKUP to the scrolling
+                              element itself — ChatGroupSeat puts them on the same div
+                              as its collapsible body, so display:none removed the
+                              whole reasoning block whenever its scroll edges changed,
+                              which is continuously while reasoning streams
+     _fade                    a standalone overlay with no content (the workspace's
+                              24px gradient at the foot of the session list)
+
+   The original rule guessed what the other half of the class name meant. Excluding
+   the Top/Bottom pair keeps the overlay hidden without touching the scrollers. */
+html[data-bc-active="true"] [class*="_fade"]:not([class*="_fadeTop"]):not([class*="_fadeBottom"]){display:none!important}
 html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
 `;
   document.head.append(style);
