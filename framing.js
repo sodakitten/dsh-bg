@@ -1633,11 +1633,6 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       document.querySelector('[class*="_composerStack"]');
     if (!area) return;
 
-    // Keep the current target while it is still valid. Re-deciding on every mutation
-    // made the tag hop between the card and a same-width wrapper inside it; each hop
-    // removed and re-added backdrop-filter, which repaints and re-anchors fixed
-    // descendants — the shuddering when the model picker opens. It also skips the
-    // measurement below, which is where the forced layout came from.
     // The gate is the AREA, not the target.
     //
     // Gating on the target kept the frost on a node that was no longer the card. The
