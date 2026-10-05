@@ -223,7 +223,7 @@ html[data-bc-active="true"] #root{position:relative;z-index:1;background:transpa
 
    The original rule guessed what the other half of the class name meant. Excluding
    the Top/Bottom pair keeps the overlay hidden without touching the scrollers. */
-html[data-bc-active="true"] [class*="_fade"]:not([class*="_fadeTop"]):not([class*="_fadeBottom"]){display:none!important}
+html[data-bc-active="true"] [class*="_sidebarCol"] [class*="_fade"]:empty{display:none!important}
 html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
 `;
   document.head.append(style);

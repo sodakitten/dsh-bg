@@ -339,12 +339,9 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     // The injected panels are hidden with display:none rather than rebuilt, so
     // their drawers kept their open state across visits.
     document.dispatchEvent(new CustomEvent("bgc:page-opened"));
-    // The injected panels keep their drawers open otherwise: they are hidden
-    // with display:none rather than rebuilt, so state survives the visit.
-    document.dispatchEvent(new CustomEvent("bgc:page-opened"));
     navButton.setAttribute("aria-current", "true");
     renderDim();
-  renderBlur();
+    renderBlur();
     void refresh();
     const options = page.parentElement;
     if (options) options.scrollTop = 0;
@@ -938,7 +935,19 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
       sync();
     });
   }
-  new MutationObserver(scheduleSync).observe(document.documentElement, { childList: true, subtree: true });
+  new MutationObserver((records) => {
+    // Session streaming and hover previews do not alter the settings mount.
+    const changed = records.some((record) => {
+      if (dialogEl && (record.target === dialogEl || dialogEl.contains(record.target))) return true;
+      for (const node of [...record.addedNodes, ...record.removedNodes]) {
+        if (node.nodeType !== 1) continue;
+        if (dialogEl && (node === dialogEl || node.contains(dialogEl))) return true;
+        if (node.matches('[role="dialog"][aria-modal="true"]') || node.querySelector('[role="dialog"][aria-modal="true"] nav')) return true;
+      }
+      return false;
+    });
+    if (changed) scheduleSync();
+  }).observe(document.documentElement, { childList: true, subtree: true });
   // Drift safety net: one query per second, no layout reads.
   setInterval(sync, 1000);
   sync();

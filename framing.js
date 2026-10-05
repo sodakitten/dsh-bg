@@ -67,6 +67,9 @@
   const DENSITY_MIN = 0.15;
   const DENSITY_MAX = 1.5;
   const DENSITY_DEFAULT = 1.5;
+  const TITLE_DENSITY_MIN = 0.5;
+  const TITLE_DENSITY_MAX = 1.5;
+  const TITLE_DENSITY_DEFAULT = 1.3;
   const STAGE_ID = "beauticode-bg-stage";
   /** The atmosphere layer. 画窗 paints its background here, not in the stage. */
   const GALLERY_ID = "beauticode-gallery-bg";
@@ -122,7 +125,10 @@
       density: Number.isFinite(density)
         ? Math.min(DENSITY_MAX, Math.max(DENSITY_MIN, density))
         : DENSITY_DEFAULT,
-      // The Windows title strip follows the content unless asked otherwise.
+      // Relative to the body's live phase/tone token; 1 matches its composite.
+      titleDensity: typeof raw.titleDensity === "number" && Number.isFinite(raw.titleDensity)
+        ? Math.min(TITLE_DENSITY_MAX, Math.max(TITLE_DENSITY_MIN, raw.titleDensity))
+        : TITLE_DENSITY_DEFAULT,
     };
   }
 
@@ -170,6 +176,7 @@
     if (settings.sidebarFollow) root.dataset.bgcSidebar = "follow";
     else delete root.dataset.bgcSidebar;
     root.style.setProperty("--bgc-ui", settings.density.toFixed(3));
+    root.style.setProperty("--bgc-title-density", settings.titleDensity.toFixed(3));
     if (settings.edgeFill) root.dataset.bgcEdge = "fill";
     else delete root.dataset.bgcEdge;
 
@@ -607,6 +614,45 @@ html[data-bc-active="true"]:has(#root [data-phase="settling"]) body{
   background-color: rgba(255, 255, 255, 0.01) !important;
 }
 
+/* The Windows strip paints frame + ::before, while the transcript paints
+   frame + centerCol + chat root (the sidebar likewise paints three layers).
+   Equal token values are therefore NOT equal final transparency. Give the
+   existing strip two base coats, matching the body's three coats including
+   the frame underneath at 100%. Scale only the strip's two coats, using the
+   live phase/tone/density token so the title slider also follows phase changes.
+   Do not alter the content or native caption probe. Match the actual layout
+   structurally: a bare "_frame" also names unrelated transcript components. */
+html[data-bc-active="true"][data-windows-titlebar] [class*="_frame"]:has(> [class*="_centerCol"])::before{
+  --bgc-title-base:rgb(from var(--dsw-alias-bg-base) r g b / clamp(0,calc(alpha * var(--bgc-title-density,1.3)),1));
+  background-color:var(--bgc-title-base) !important;
+  background-image:linear-gradient(var(--bgc-title-base),var(--bgc-title-base)) !important;
+}
+
+/* DSH's body-portaled Modal mask starts below the native caption (40px).
+   With a wallpaper across the whole window this leaves a bright title strip.
+   Extend the existing mask, preserving its color, blur, enter animation and
+   close handler. Keep the root/card padding and native caption/menu intact. */
+html[data-bc-active="true"][data-windows-titlebar] [role="presentation"]:has(> [role="dialog"][aria-modal="true"]) > [class*="_mask"][aria-hidden="true"]{
+  top:0 !important;
+}
+
+/* dsh-claude's global chrome stylesheet hides the host's export menu even in
+   ordinary DSH sessions. Restore only the host header utility, not its replaced
+   Claude permission/preset controls or menus elsewhere in the application. */
+html[data-windows-titlebar] [class*="_headerUtilities"] button[class*="_moreButton"][aria-haspopup="menu"]{
+  display:inline-flex !important;
+}
+
+/* HoverCard's portaled file preview reads layer-1, which the wallpaper makes
+   translucent. A foreground document preview needs its own solid material.
+   Keep the host's placement and opening/closing opacity animation unchanged. */
+html[data-bc-active="true"] body > [class*="_card"][class*="_preview"]{
+  background-color:var(--dsw-static-neutral-bluish-900,#11141b) !important;
+}
+html[data-bc-resolved-tone="light"][data-bc-active="true"] body > [class*="_card"][class*="_preview"]{
+  background-color:var(--dsw-static-neutral-bluish-50,#f8fafc) !important;
+}
+
 /* The 新会话 pill and the account row at the foot of the sidebar were both painted
    as solid light surfaces, so each read as a white sticker laid over the wallpaper
    showing through. The workspace rows below already behave the way they should —
@@ -728,25 +774,24 @@ html[data-bc-resolved-tone="light"][data-bc-active="true"] [class*="_compacted"]
 /* 画窗 paints its own layer and disables the stage, which is what 背景阴影 and
    背景磨砂 both target — so on that preset both sliders move nothing. Point
    them at the visible layer instead. Scoped to the gallery flag throughout. */
-html[data-bc-gallery="true"] #beauticode-gallery-bg img{
+html[data-bc-gallery="true"][data-bc-bg-blur="true"] #beauticode-gallery-bg img{
   filter:blur(var(--bc-bg-blur,0px));
 }
 
-/* Opt-in: take the blur off the wallpaper itself and put it on a full-viewport
-   backdrop layer above it.
-
-   filter:blur() samples beyond the element, so a full-bleed image fades to
-   transparent in its outer pixels and the page's own background shows through —
-   a thin rim that reads white on a light theme and black on a dark one. A
-   backdrop-filter layer has no image edge of its own: its backdrop is the
-   composited content behind it.
-
-   z-index:1 sits above the <img> and below the ::after that carries the dim
-   overlay. Off by default, and a no-op while 背景磨砂 is 0. */
-html[data-bc-gallery="true"][data-bgc-edge="fill"] #beauticode-gallery-bg img{
+/* Edge fill must cover BOTH renderers: ordinary image/video slots and 画窗.
+   Keep the media's exact crop/transform and blur its painted viewport instead
+   of its transparent outer pixels. Each slot owns its layer, so poster/video
+   handover and carousel fades stay inside the existing opacity transaction.
+   The gallery layer is below its dim overlay and water canvas; the slot layer
+   is above both poster and video, below the stage's dim overlay and the app.
+   Require positive blur: at 0 there must be no filter/compositing layer at all. */
+html[data-bc-active="true"][data-bc-bg-blur="true"][data-bgc-edge="fill"] #beauticode-bg-stage .beauticode-media-slot img,
+html[data-bc-active="true"][data-bc-bg-blur="true"][data-bgc-edge="fill"] #beauticode-bg-stage .beauticode-media-slot video,
+html[data-bc-gallery="true"][data-bc-bg-blur="true"][data-bgc-edge="fill"] #beauticode-gallery-bg img{
   filter:none;
 }
-html[data-bc-gallery="true"][data-bgc-edge="fill"] #beauticode-gallery-bg::before{
+html[data-bc-active="true"][data-bc-bg-blur="true"][data-bgc-edge="fill"] #beauticode-bg-stage .beauticode-media-slot::after,
+html[data-bc-gallery="true"][data-bc-bg-blur="true"][data-bgc-edge="fill"] #beauticode-gallery-bg::before{
   content:"";
   position:absolute;
   inset:0;
@@ -754,6 +799,9 @@ html[data-bc-gallery="true"][data-bgc-edge="fill"] #beauticode-gallery-bg::befor
   pointer-events:none;
   -webkit-backdrop-filter:blur(var(--bc-bg-blur,0px));
   backdrop-filter:blur(var(--bc-bg-blur,0px));
+}
+html[data-bc-active="true"][data-bc-bg-blur="true"][data-bgc-edge="fill"] #beauticode-bg-stage .beauticode-media-slot::after{
+  z-index:3;
 }
 html[data-bc-gallery="true"] #beauticode-gallery-bg::after{
   content:"";
@@ -998,6 +1046,8 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
   let edgeButton = null;
   let densitySlider = null;
   let densityValue = null;
+  let titleDensitySlider = null;
+  let titleDensityValue = null;
 
   const RESET_ICON =
     '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
@@ -1025,6 +1075,12 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       if (Number(densitySlider.value) !== scaled) densitySlider.value = String(scaled);
     }
     if (densityValue) densityValue.textContent = formatDensity(settings.density);
+    if (titleDensitySlider) {
+      const scaled = Math.round(settings.titleDensity * 100);
+      if (Number(titleDensitySlider.value) !== scaled) titleDensitySlider.value = String(scaled);
+      titleDensitySlider.setAttribute("aria-valuetext", `${scaled}%${scaled === 100 ? "，与正文一致" : ""}`);
+    }
+    if (titleDensityValue) titleDensityValue.textContent = formatDensity(settings.titleDensity);
   }
 
   function buildUiBlock() {
@@ -1049,10 +1105,21 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       '<span class="bc-row-desc">开始对话后界面会变实；往左更透，往右更清楚</span>' +
       "</div>" +
       '<div class="bc-control"><span class="bgc-sliderwrap">' +
-      '<input type="range" class="bgc-range" min="15" max="150" step="1" value="150" aria-label="工作时浓度"/>' +
-      '<span class="bgc-value">100%</span>' +
+      '<input type="range" class="bgc-range" data-bgc-setting="density" min="15" max="150" step="1" value="150" aria-label="工作时浓度"/>' +
+      '<span class="bgc-value" data-bgc-value="density">150%</span>' +
       "</span>" +
       '<button type="button" class="bgc-reset" data-bgc-act="density-reset" aria-label="恢复默认" title="恢复默认">' +
+      RESET_ICON +
+      "</button></div></div>" +
+      '<div class="bc-row"><div class="bc-row-text">' +
+      '<span class="bc-row-title">顶部浓度</span>' +
+      '<span class="bc-row-desc">100% 与正文一致；往左更透，往右更实，默认 130%</span>' +
+      "</div>" +
+      '<div class="bc-control"><span class="bgc-sliderwrap">' +
+      '<input type="range" class="bgc-range" data-bgc-setting="title-density" min="50" max="150" step="1" value="130" aria-label="顶部浓度"/>' +
+      '<span class="bgc-value" data-bgc-value="title-density">130%</span>' +
+      "</span>" +
+      '<button type="button" class="bgc-reset" data-bgc-act="title-density-reset" aria-label="恢复顶部默认浓度" title="恢复默认 130%">' +
       RESET_ICON +
       "</button></div></div>" +
       '<div class="bc-row"><div class="bc-row-text">' +
@@ -1093,8 +1160,10 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
 
     sidebarButton = el.querySelector('[data-bgc-act="sidebar"]');
     edgeButton = el.querySelector('[data-bgc-act="edge"]');
-    densitySlider = el.querySelector(".bgc-range");
-    densityValue = el.querySelector(".bgc-value");
+    densitySlider = el.querySelector('[data-bgc-setting="density"]');
+    densityValue = el.querySelector('[data-bgc-value="density"]');
+    titleDensitySlider = el.querySelector('[data-bgc-setting="title-density"]');
+    titleDensityValue = el.querySelector('[data-bgc-value="title-density"]');
 
     sidebarButton.addEventListener("click", () => {
       settings.sidebarFollow = !settings.sidebarFollow;
@@ -1121,6 +1190,22 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
 
     el.querySelector('[data-bgc-act="density-reset"]').addEventListener("click", () => {
       settings.density = DENSITY_DEFAULT;
+      applySettings();
+      writeSettings();
+      syncTransparencyControls();
+    });
+
+    titleDensitySlider.addEventListener("input", () => {
+      const next = Number(titleDensitySlider.value) / 100;
+      if (!Number.isFinite(next)) return;
+      settings.titleDensity = Math.min(TITLE_DENSITY_MAX, Math.max(TITLE_DENSITY_MIN, next));
+      applySettings();
+      writeSettings();
+      syncTransparencyControls();
+    });
+
+    el.querySelector('[data-bgc-act="title-density-reset"]').addEventListener("click", () => {
+      settings.titleDensity = TITLE_DENSITY_DEFAULT;
       applySettings();
       writeSettings();
       syncTransparencyControls();
@@ -1625,46 +1710,23 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
   /**
    * Tag the sidebar's primary action (新会话).
    *
-   * Found by shape, not by name: its class is a build hash and its label changes
-   * with the locale. Inside the sidebar column, the widest button that paints its
-   * own background and has a rounded corner is that pill.
+   * Use the host class suffix and sidebar structure, independent of its build
+   * hash or locale. Choosing by geometry repeatedly forced layout and stopped
+   * recognizing our own button after its background became transparent.
    */
   function tagSidebarAction() {
-    const column = document.querySelector('[class*="_sidebarCol"]');
-    if (!column) return;
-    const columnWidth = column.getBoundingClientRect().width;
-    let chosen = null;
-    for (const button of column.querySelectorAll("button")) {
-      const rect = button.getBoundingClientRect();
-      if (rect.width < columnWidth * 0.6 || rect.height < 28) continue;
-      const style = getComputedStyle(button);
-      if (style.backgroundColor === "rgba(0, 0, 0, 0)") continue;
-      if (parseFloat(style.borderRadius) <= 0) continue;
-      if (chosen === null || rect.width > chosen.width) chosen = { button, width: rect.width };
-    }
-    if (chosen === null) return;
-    if (chosen.button.dataset.bgcSidebarAction !== "1") chosen.button.dataset.bgcSidebarAction = "1";
+    const button = document.querySelector('[class*="_sidebarCol"] button[class*="_newSession"]');
+    if (button && button.dataset.bgcSidebarAction !== "1") button.dataset.bgcSidebarAction = "1";
   }
   /**
    * Tag the account row at the foot of the sidebar (the one showing the user name).
    *
-   * Found by position: the lowest control in the sidebar column that still spans a
-   * reasonable share of its width. Neither the class nor the label is usable — the
-   * class is a build hash and the label is the user's own name.
+   * The host settings trigger lives in the sidebar settings area. Use that
+   * structural scope instead of measuring every button to guess the lowest one.
    */
   function tagSidebarAccount() {
-    const column = document.querySelector('[class*="_sidebarCol"]');
-    if (!column) return;
-    const columnWidth = column.getBoundingClientRect().width;
-    let chosen = null;
-    for (const el of column.querySelectorAll('button, [role="button"]')) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width < columnWidth * 0.5) continue;
-      if (rect.height < 28 || rect.height > 120) continue;
-      if (chosen === null || rect.top > chosen.top) chosen = { el, top: rect.top };
-    }
-    if (chosen === null) return;
-    if (chosen.el.dataset.bgcSidebarAccount !== "1") chosen.el.dataset.bgcSidebarAccount = "1";
+    const button = document.querySelector('[class*="_sidebarCol"] [class*="_settingsArea"] button[class*="_trigger"]');
+    if (button && button.dataset.bgcSidebarAccount !== "1") button.dataset.bgcSidebarAccount = "1";
   }
   /**
    * Tag the composer card — the composer card normally, the question card while
@@ -1814,18 +1876,21 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
   }
 
   function startPageObserver() {
-    // The observer spans the whole document, so it fires for every node the app
-    // inserts anywhere — including every chunk of a streaming reply. Its callback
-    // runs three functions that measure geometry: tagComposerSurface walks every
-    // descendant of the composer area calling getBoundingClientRect, and the two
-    // sidebar taggers do the same per button. Forced synchronous layout at that rate
-    // is what made the window visibly stutter while a reply was streaming.
-    //
-    // All three are cosmetic — they move the frost and the button material onto the
-    // right elements — so they do not need to run on every mutation. One pass per
-    // frame would not have been enough either, because a streaming reply mutates on
-    // essentially every frame; a minimum interval is what bounds the work. The
-    // trailing pass guarantees the settled state is always the tagged one.
+    // Only changes inside our settings page, sidebar or composer can affect
+    // these decorations. Transcript chunks and portaled previews must not trigger
+    // geometry scans. Sidebar tagging uses host structure and reads no layout.
+    const chromeSelector = `#${PAGE_ID}, [class*="_sidebarCol"], [class*="_composerSeat"], [class*="_composerStack"]`;
+    const relevant = (record) => {
+      const target = record.target;
+      if (target.nodeType === 1 && target.closest(chromeSelector)) return true;
+      if (record.type !== "childList") return false;
+      for (const node of [...record.addedNodes, ...record.removedNodes]) {
+        if (node.nodeType !== 1) continue;
+        if (node.matches(chromeSelector) || node.querySelector(chromeSelector)) return true;
+        if (node.tagName === "SPAN" && (node.getAttribute("style") || "").includes("--dsw-specific-sidebar-fill")) return true;
+      }
+      return false;
+    };
     const COOLDOWN_MS = 200;
     let pending = false;
     let lastRun = 0;
@@ -1845,7 +1910,8 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       tagSidebarAccount();
     };
 
-    const onMutation = () => {
+    const onMutation = (records) => {
+      if (!records.some(relevant)) return;
       if (pending) return;
       pending = true;
       const elapsed = Date.now() - lastRun;
