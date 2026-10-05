@@ -70,6 +70,9 @@
   const TITLE_DENSITY_MIN = 0.5;
   const TITLE_DENSITY_MAX = 1.5;
   const TITLE_DENSITY_DEFAULT = 1.3;
+  const SCROLLBAR_IDLE_MIN = 1;
+  const SCROLLBAR_IDLE_MAX = 30;
+  const SCROLLBAR_IDLE_DEFAULT = 2;
   const STAGE_ID = "beauticode-bg-stage";
   /** The atmosphere layer. 画窗 paints its background here, not in the stage. */
   const GALLERY_ID = "beauticode-gallery-bg";
@@ -93,6 +96,7 @@
   let identityInFlight = false;
   // A background change that arrives while a refresh is already running.
   let identityReplay = false;
+  let scrollbarIdle = null;
 
   /* ------------------------------------------------------------------ store */
 
@@ -129,6 +133,10 @@
       titleDensity: typeof raw.titleDensity === "number" && Number.isFinite(raw.titleDensity)
         ? Math.min(TITLE_DENSITY_MAX, Math.max(TITLE_DENSITY_MIN, raw.titleDensity))
         : TITLE_DENSITY_DEFAULT,
+      scrollbarAutoHide: raw.scrollbarAutoHide === true,
+      scrollbarIdleSeconds: typeof raw.scrollbarIdleSeconds === "number" && Number.isFinite(raw.scrollbarIdleSeconds)
+        ? Math.min(SCROLLBAR_IDLE_MAX, Math.max(SCROLLBAR_IDLE_MIN, raw.scrollbarIdleSeconds))
+        : SCROLLBAR_IDLE_DEFAULT,
     };
   }
 
@@ -179,7 +187,102 @@
     root.style.setProperty("--bgc-title-density", settings.titleDensity.toFixed(3));
     if (settings.edgeFill) root.dataset.bgcEdge = "fill";
     else delete root.dataset.bgcEdge;
+    scrollbarIdle?.configure(settings.scrollbarAutoHide, settings.scrollbarIdleSeconds * 1000);
+  }
 
+  /* ----------------------------------------------------- idle scrollbar */
+
+  function createScrollbarIdleController() {
+    const root = document.documentElement;
+    let enabled = false;
+    let delayMs = 0;
+    let timer = null;
+    let listeners = null;
+    let lastActivity = 0;
+    const heldPointers = new Set();
+
+    const clearTimer = () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    };
+    const show = () => {
+      if (root.dataset.bgcScrollbars !== "visible") root.dataset.bgcScrollbars = "visible";
+    };
+    const schedule = () => {
+      if (timer !== null || !enabled || document.hidden || heldPointers.size) return;
+      timer = setTimeout(expire, Math.max(0, delayMs - (performance.now() - lastActivity)));
+    };
+    function expire() {
+      timer = null;
+      if (!enabled || document.hidden || heldPointers.size) return;
+      if (performance.now() - lastActivity < delayMs) schedule();
+      else root.dataset.bgcScrollbars = "hidden";
+    }
+    function activity() {
+      if (!enabled) return;
+      lastActivity = performance.now();
+      show();
+      // High-frequency movement only updates the deadline. One pending timer
+      // checks it later, without repeatedly writing attributes or reading layout.
+      schedule();
+    }
+    function pointerDown(event) {
+      heldPointers.add(event.pointerId);
+      clearTimer();
+      activity();
+    }
+    function pointerUp(event) {
+      heldPointers.delete(event.pointerId);
+      activity();
+    }
+    function releasePointers() {
+      heldPointers.clear();
+      schedule();
+    }
+    function visibilityChanged() {
+      clearTimer();
+      heldPointers.clear();
+      if (!document.hidden) activity();
+    }
+    function pageHidden() {
+      clearTimer();
+      heldPointers.clear();
+    }
+
+    return {
+      configure(nextEnabled, nextDelayMs) {
+        if (enabled === nextEnabled && delayMs === nextDelayMs) return;
+        enabled = nextEnabled;
+        delayMs = nextDelayMs;
+        clearTimer();
+        heldPointers.clear();
+        if (!enabled) {
+          listeners?.abort();
+          listeners = null;
+          delete root.dataset.bgcScrollbars;
+          return;
+        }
+        if (!listeners) {
+          listeners = new AbortController();
+          const options = { capture: true, passive: true, signal: listeners.signal };
+          document.addEventListener("pointermove", activity, options);
+          document.addEventListener("pointerdown", pointerDown, options);
+          document.addEventListener("pointerup", pointerUp, options);
+          document.addEventListener("pointercancel", pointerUp, options);
+          document.addEventListener("wheel", activity, options);
+          document.addEventListener("keydown", activity, options);
+          document.addEventListener("visibilitychange", visibilityChanged, options);
+          // Capture would also see a focused button blurring during pointerdown,
+          // clearing a drag that has just started inside the same window.
+          const windowOptions = { passive: true, signal: listeners.signal };
+          window.addEventListener("blur", releasePointers, windowOptions);
+          window.addEventListener("focus", activity, windowOptions);
+          window.addEventListener("pagehide", pageHidden, windowOptions);
+          window.addEventListener("pageshow", activity, windowOptions);
+        }
+        activity();
+      },
+    };
   }
 
   /* --------------------------------------------------------------- geometry */
@@ -514,6 +617,7 @@
 #${UI_BLOCK_ID} .bgc-range{-webkit-appearance:none;appearance:none;width:120px;height:4px;margin:0;padding:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
 #${UI_BLOCK_ID} .bgc-range::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:var(--dsw-alias-border-l3)}
 #${UI_BLOCK_ID} .bgc-range::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5px;border:.5px solid var(--dsw-alias-border-l4);border-radius:50%;background:var(--dsw-alias-bg-layer-1);box-shadow:var(--dsw-shadow-lv1);cursor:pointer}
+#${UI_BLOCK_ID} .bgc-range:disabled{opacity:.4;cursor:default}
 #${UI_BLOCK_ID} .bgc-value{min-width:2.6em;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;font-variant-numeric:tabular-nums;text-align:right}
 /* Carousel section: reuses the panel's own controls so it reads as part of the
    same block rather than a bolt-on. */
@@ -535,6 +639,15 @@
 #${UI_BLOCK_ID} .bgc-cempty{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:32px}
 #${UI_BLOCK_ID} .bgc-reset{cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:8px;background:0 0;color:var(--dsw-alias-label-tertiary)}
 #${UI_BLOCK_ID} .bgc-reset:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
+`;
+
+  // Match the native conversation scrollport, never inner file/code previews.
+  // Only its paint changes: gutter, overflow, width and native dragging survive.
+  const SCROLLBAR_STYLE = `
+html[data-bgc-scrollbars="hidden"] #root [class*="_scrollBody"]::-webkit-scrollbar-thumb{
+  background-color:transparent !important;box-shadow:none !important}
+html[data-bgc-scrollbars="hidden"] #root [class*="_scrollBody"]::-webkit-scrollbar-thumb:active{
+  background-color:var(--dsh-scrollbar-thumb-hover,var(--dsw-alias-scrollbar-hover-l1)) !important}
 `;
 
   /**
@@ -1048,6 +1161,10 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
   let densityValue = null;
   let titleDensitySlider = null;
   let titleDensityValue = null;
+  let scrollbarButton = null;
+  let scrollbarDelaySlider = null;
+  let scrollbarDelayValue = null;
+  let scrollbarDelayReset = null;
 
   const RESET_ICON =
     '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
@@ -1081,6 +1198,18 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       titleDensitySlider.setAttribute("aria-valuetext", `${scaled}%${scaled === 100 ? "，与正文一致" : ""}`);
     }
     if (titleDensityValue) titleDensityValue.textContent = formatDensity(settings.titleDensity);
+    if (scrollbarButton) {
+      scrollbarButton.textContent = settings.scrollbarAutoHide ? "已开" : "已关";
+      scrollbarButton.classList.toggle("on", settings.scrollbarAutoHide);
+      scrollbarButton.setAttribute("aria-pressed", settings.scrollbarAutoHide ? "true" : "false");
+    }
+    if (scrollbarDelaySlider) {
+      scrollbarDelaySlider.value = String(settings.scrollbarIdleSeconds);
+      scrollbarDelaySlider.disabled = !settings.scrollbarAutoHide;
+      scrollbarDelaySlider.setAttribute("aria-valuetext", `${settings.scrollbarIdleSeconds} 秒`);
+    }
+    if (scrollbarDelayValue) scrollbarDelayValue.textContent = `${settings.scrollbarIdleSeconds} 秒`;
+    if (scrollbarDelayReset) scrollbarDelayReset.disabled = !settings.scrollbarAutoHide;
   }
 
   function buildUiBlock() {
@@ -1120,6 +1249,22 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       '<span class="bgc-value" data-bgc-value="title-density">130%</span>' +
       "</span>" +
       '<button type="button" class="bgc-reset" data-bgc-act="title-density-reset" aria-label="恢复顶部默认浓度" title="恢复默认 130%">' +
+      RESET_ICON +
+      "</button></div></div>" +
+      '<div class="bc-row"><div class="bc-row-text">' +
+      '<span class="bc-row-title">会话滚动条自动隐藏</span>' +
+      '<span class="bc-row-desc">闲置后隐藏右侧滚动条；移动鼠标、滚动或按键时显示，拖动时保持显示</span>' +
+      "</div>" +
+      '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-bgc-act="scrollbar-auto-hide" aria-label="会话滚动条自动隐藏" aria-pressed="false">已关</button></div></div>' +
+      '<div class="bc-row"><div class="bc-row-text">' +
+      '<span class="bc-row-title">滚动条隐藏等待</span>' +
+      '<span class="bc-row-desc">最后一次操作后等待多久，范围 1–30 秒，默认 2 秒</span>' +
+      "</div>" +
+      '<div class="bc-control"><span class="bgc-sliderwrap">' +
+      '<input type="range" class="bgc-range" data-bgc-setting="scrollbar-idle" min="1" max="30" step="1" value="2" aria-label="滚动条隐藏等待"/>' +
+      '<span class="bgc-value" data-bgc-value="scrollbar-idle">2 秒</span>' +
+      "</span>" +
+      '<button type="button" class="bgc-reset" data-bgc-act="scrollbar-idle-reset" aria-label="恢复默认滚动条隐藏等待" title="恢复默认 2 秒">' +
       RESET_ICON +
       "</button></div></div>" +
       '<div class="bc-row"><div class="bc-row-text">' +
@@ -1164,6 +1309,10 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
     densityValue = el.querySelector('[data-bgc-value="density"]');
     titleDensitySlider = el.querySelector('[data-bgc-setting="title-density"]');
     titleDensityValue = el.querySelector('[data-bgc-value="title-density"]');
+    scrollbarButton = el.querySelector('[data-bgc-act="scrollbar-auto-hide"]');
+    scrollbarDelaySlider = el.querySelector('[data-bgc-setting="scrollbar-idle"]');
+    scrollbarDelayValue = el.querySelector('[data-bgc-value="scrollbar-idle"]');
+    scrollbarDelayReset = el.querySelector('[data-bgc-act="scrollbar-idle-reset"]');
 
     sidebarButton.addEventListener("click", () => {
       settings.sidebarFollow = !settings.sidebarFollow;
@@ -1206,6 +1355,27 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
 
     el.querySelector('[data-bgc-act="title-density-reset"]').addEventListener("click", () => {
       settings.titleDensity = TITLE_DENSITY_DEFAULT;
+      applySettings();
+      writeSettings();
+      syncTransparencyControls();
+    });
+
+    scrollbarButton.addEventListener("click", () => {
+      settings.scrollbarAutoHide = !settings.scrollbarAutoHide;
+      applySettings();
+      writeSettings();
+      syncTransparencyControls();
+    });
+    scrollbarDelaySlider.addEventListener("input", () => {
+      const next = Number(scrollbarDelaySlider.value);
+      if (!Number.isFinite(next)) return;
+      settings.scrollbarIdleSeconds = Math.min(SCROLLBAR_IDLE_MAX, Math.max(SCROLLBAR_IDLE_MIN, Math.round(next)));
+      applySettings();
+      writeSettings();
+      syncTransparencyControls();
+    });
+    scrollbarDelayReset.addEventListener("click", () => {
+      settings.scrollbarIdleSeconds = SCROLLBAR_IDLE_DEFAULT;
       applySettings();
       writeSettings();
       syncTransparencyControls();
@@ -1938,7 +2108,8 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
   /* ------------------------------------------------------------------ boot  */
 
   function boot() {
-    ensureStyle("bgc-style", CROP_STYLE + UI_STYLE + TRANSPARENCY_STYLE);
+    ensureStyle("bgc-style", CROP_STYLE + UI_STYLE + TRANSPARENCY_STYLE + SCROLLBAR_STYLE);
+    scrollbarIdle = createScrollbarIdleController();
     applySettings();
     startPageObserver();
     startStageObserver();
