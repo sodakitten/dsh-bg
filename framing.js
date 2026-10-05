@@ -644,10 +644,22 @@
   // Match the native conversation scrollport, never inner file/code previews.
   // Only its paint changes: gutter, overflow, width and native dragging survive.
   const SCROLLBAR_STYLE = `
-html[data-bgc-scrollbars="hidden"] #root [class*="_scrollBody"]::-webkit-scrollbar-thumb{
-  background-color:transparent !important;box-shadow:none !important}
-html[data-bgc-scrollbars="hidden"] #root [class*="_scrollBody"]::-webkit-scrollbar-thumb:active{
+/* Animate on the real scrollport: native scrollbar pseudo-elements do not
+   reliably run their own transitions. The registered number interpolates and
+   feeds the native thumb's paint without changing its geometry. */
+@property --bgc-scrollbar-alpha{syntax:"<number>";inherits:true;initial-value:1}
+html[data-bgc-scrollbars] #root [class*="_scrollBody"]{
+  --bgc-scrollbar-alpha:1;transition:--bgc-scrollbar-alpha 180ms ease-out}
+html[data-bgc-scrollbars="hidden"] #root [class*="_scrollBody"]{--bgc-scrollbar-alpha:0}
+html[data-bgc-scrollbars] #root [class*="_scrollBody"]::-webkit-scrollbar-thumb{
+  background-color:color-mix(in srgb,var(--dsh-scrollbar-thumb,var(--dsw-alias-scrollbar-bg-l1)) calc(var(--bgc-scrollbar-alpha) * 100%),transparent) !important;
+  box-shadow:none !important}
+html[data-bgc-scrollbars] #root [class*="_scrollBody"]::-webkit-scrollbar-thumb:hover{
+  background-color:color-mix(in srgb,var(--dsh-scrollbar-thumb-hover,var(--dsw-alias-scrollbar-hover-l1)) calc(var(--bgc-scrollbar-alpha) * 100%),transparent) !important}
+html[data-bgc-scrollbars] #root [class*="_scrollBody"]::-webkit-scrollbar-thumb:active{
   background-color:var(--dsh-scrollbar-thumb-hover,var(--dsw-alias-scrollbar-hover-l1)) !important}
+@media (prefers-reduced-motion:reduce){
+  html[data-bgc-scrollbars] #root [class*="_scrollBody"]{transition:none}}
 `;
 
   /**

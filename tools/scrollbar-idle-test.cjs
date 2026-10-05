@@ -1,10 +1,11 @@
 // Browser behavior checks for the native conversation scrollbar. Requires
-// Playwright on NODE_PATH; DSH_TEST_BROWSER_CHANNEL defaults to Windows Edge.
+// Playwright and pngjs on NODE_PATH; browser channel defaults to Windows Edge.
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
+const { PNG } = require('pngjs');
 const source = fs.readFileSync(path.join(__dirname, '..', 'framing.js'), 'utf8');
 const storageKey = 'dsh-bg-crop/settings/v1';
 // DSH 0.2.0-rc.2 ui-theme scrollbar contract: paint via elevation tokens,
@@ -47,13 +48,21 @@ const server = http.createServer((req, res) => {
   let checks = 0;
   const check = (value, message) => { assert(value, message); checks++; console.log('PASS ' + message); };
   const state = () => page.evaluate(() => document.documentElement.dataset.bgcScrollbars);
-  const snapshot = () => page.locator('#conversation').evaluate(el => ({
-    color: getComputedStyle(el, '::-webkit-scrollbar-thumb').backgroundColor,
-    width: getComputedStyle(el, '::-webkit-scrollbar').width,
-    gutter: getComputedStyle(el).scrollbarGutter,
-    clientWidth: el.clientWidth, scrollTop: el.scrollTop,
-    code: getComputedStyle(document.getElementById('code'), '::-webkit-scrollbar-thumb').backgroundColor,
-  }));
+  const snapshot = () => page.locator('#conversation').evaluate(el => {
+    const context = document.createElement('canvas').getContext('2d');
+    const rgba = color => {
+      context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1);
+      return [...context.getImageData(0, 0, 1, 1).data];
+    };
+    return {
+      rgba: rgba(getComputedStyle(el, '::-webkit-scrollbar-thumb').backgroundColor),
+      alpha: Number(getComputedStyle(el).getPropertyValue('--bgc-scrollbar-alpha')),
+      width: getComputedStyle(el, '::-webkit-scrollbar').width,
+      gutter: getComputedStyle(el).scrollbarGutter,
+      clientWidth: el.clientWidth, scrollTop: el.scrollTop,
+      code: getComputedStyle(document.getElementById('code'), '::-webkit-scrollbar-thumb').backgroundColor,
+    };
+  });
   const delay = page.getByRole('slider', { name: '滚动条隐藏等待', exact: true });
   const toggle = page.getByRole('button', { name: '会话滚动条自动隐藏', exact: true });
   const setDelay = value => delay.evaluate((el, value) => {
@@ -68,15 +77,23 @@ const server = http.createServer((req, res) => {
     check(await state() === undefined, 'default leaves native scrollbar behavior untouched');
     await toggle.click();
     const visible = await snapshot();
-    await page.clock.runFor(2200);
+    await page.clock.runFor(2020);
+    // CSS transitions use the browser's render clock, not the mocked JS timer.
+    await page.waitForTimeout(60);
+    const fadingOut = await snapshot();
+    check(fadingOut.alpha > 0 && fadingOut.alpha < 1 && fadingOut.rgba[3] > 0 && fadingOut.rgba[3] < 255, 'idle hide has a real intermediate native thumb color');
+    await page.waitForTimeout(220);
     const hidden = await snapshot();
-    check(hidden.color === 'rgba(0, 0, 0, 0)', 'idle scrollbar thumb becomes transparent');
+    check(hidden.rgba[3] === 0, 'idle scrollbar thumb becomes transparent after fading');
     check(hidden.width === visible.width && hidden.gutter === visible.gutter && hidden.clientWidth === visible.clientWidth, 'hiding preserves scrollbar width, gutter and transcript geometry');
-    check(hidden.code === visible.code && hidden.code !== hidden.color, 'inner code scrollbar retains native color');
+    check(hidden.code === visible.code && hidden.code !== 'rgba(0, 0, 0, 0)', 'inner code scrollbar retains native color');
 
     await page.mouse.move(300, 100);
-    await page.clock.runFor(30);
-    check(await state() === 'visible' && ['rgb(120, 120, 120)', 'rgb(90, 90, 90)'].includes((await snapshot()).color), 'pointer movement immediately restores native paint');
+    await page.waitForTimeout(60);
+    const fadingIn = await snapshot();
+    check(await state() === 'visible' && fadingIn.alpha > 0 && fadingIn.alpha < 1 && fadingIn.rgba[3] > 0 && fadingIn.rgba[3] < 255, 'pointer movement starts a short native thumb fade-in');
+    await page.waitForTimeout(220);
+    check((await snapshot()).rgba[3] === 255, 'fade-in completes at the native thumb opacity');
     await page.clock.runFor(1200);
     await page.mouse.move(320, 100);
     await page.clock.runFor(1200);
@@ -122,7 +139,7 @@ const server = http.createServer((req, res) => {
     await toggle.click();
     check(await state() === undefined && await delay.isDisabled(), 'switch off restores native behavior and disables delay control');
     await page.clock.runFor(31000);
-    check((await snapshot()).color === visible.color, 'disabled feature leaves no timer hiding native scrollbars');
+    check(JSON.stringify((await snapshot()).rgba) === JSON.stringify(visible.rgba), 'disabled feature leaves no timer hiding native scrollbars');
     check(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).scrollbarIdleSeconds, storageKey) === 5, 'switch off retains the selected waiting time');
     await page.reload();
     await page.clock.runFor(300);
@@ -145,7 +162,7 @@ const server = http.createServer((req, res) => {
     await page.mouse.down();
     await page.waitForTimeout(80);
     await page.clock.runFor(4000);
-    check((await snapshot()).color !== 'rgba(0, 0, 0, 0)', 'native thumb stays painted while held beyond the timeout');
+    check((await snapshot()).rgba[3] > 0, 'native thumb stays painted while held beyond the timeout');
     await page.mouse.move(nativeBox.x + nativeBox.width - 5, nativeBox.y + 65);
     await page.waitForTimeout(80);
     check((await snapshot()).scrollTop > 0, 'native scrollbar dragging still scrolls the conversation');
@@ -153,6 +170,36 @@ const server = http.createServer((req, res) => {
     await page.mouse.move(300, 100);
     await page.clock.runFor(2200);
     check(await state() === 'hidden', 'native drag release does not leave an idle timer stuck');
+    await page.mouse.move(350, 110);
+    await page.waitForTimeout(220);
+    await page.clock.runFor(2020);
+    await page.waitForTimeout(60);
+    const interrupted = await snapshot();
+    await page.mouse.move(360, 110);
+    await page.waitForTimeout(40);
+    const resumed = await snapshot();
+    check(await state() === 'visible' && resumed.alpha > interrupted.alpha && resumed.alpha < 1, 'activity reverses an unfinished fade without snapping to fully visible');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.clock.runFor(2200);
+    check((await snapshot()).alpha === 0, 'reduced motion skips the fade-out');
+    await page.mouse.move(370, 110);
+    await page.waitForTimeout(30);
+    check((await snapshot()).alpha === 1, 'reduced motion skips the fade-in');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.mouse.move(700, 800);
+    await page.locator('#conversation').evaluate(el => { el.scrollTop = 0; });
+    await setDelay(1);
+    const thumbPixel = async () => {
+      const png = PNG.sync.read(await page.screenshot({ clip: { x: nativeBox.x + nativeBox.width - 6, y: nativeBox.y + 10, width: 2, height: 2 } }));
+      return png.data[0];
+    };
+    await page.waitForTimeout(250);
+    const paintedBefore = await thumbPixel();
+    await page.waitForFunction(() => document.documentElement.dataset.bgcScrollbars === 'hidden');
+    const paintedDuring = await thumbPixel();
+    await page.waitForTimeout(220);
+    const paintedAfter = await thumbPixel();
+    check(paintedBefore < paintedDuring && paintedDuring < paintedAfter && paintedAfter === 255, 'native scrollbar screenshot pixels fade gradually into the page');
     check(pageErrors.length === 0, 'client script has no runtime errors: ' + JSON.stringify(pageErrors));
     console.log(checks + ' scrollbar behavior checks passed.');
   } finally {
