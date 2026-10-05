@@ -66,7 +66,7 @@
   const MAX_ZOOM = 4;
   const DENSITY_MIN = 0.15;
   const DENSITY_MAX = 1.5;
-  const DENSITY_DEFAULT = 1.5;
+  const DENSITY_DEFAULT = 0.8;
   const TITLE_DENSITY_MIN = 0.5;
   const TITLE_DENSITY_MAX = 1.5;
   const TITLE_DENSITY_DEFAULT = 1.3;
@@ -1102,13 +1102,13 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       "</div>" +
       '<div class="bc-row"><div class="bc-row-text">' +
       '<span class="bc-row-title">工作时浓度</span>' +
-      '<span class="bc-row-desc">开始对话后界面会变实；往左更透，往右更清楚</span>' +
+      '<span class="bc-row-desc">开始对话后界面会变实；往左更透，往右更清楚，默认 80%</span>' +
       "</div>" +
       '<div class="bc-control"><span class="bgc-sliderwrap">' +
-      '<input type="range" class="bgc-range" data-bgc-setting="density" min="15" max="150" step="1" value="150" aria-label="工作时浓度"/>' +
-      '<span class="bgc-value" data-bgc-value="density">150%</span>' +
+      '<input type="range" class="bgc-range" data-bgc-setting="density" min="15" max="150" step="1" value="80" aria-label="工作时浓度"/>' +
+      '<span class="bgc-value" data-bgc-value="density">80%</span>' +
       "</span>" +
-      '<button type="button" class="bgc-reset" data-bgc-act="density-reset" aria-label="恢复默认" title="恢复默认">' +
+      '<button type="button" class="bgc-reset" data-bgc-act="density-reset" aria-label="恢复默认工作时浓度" title="恢复默认 80%">' +
       RESET_ICON +
       "</button></div></div>" +
       '<div class="bc-row"><div class="bc-row-text">' +
