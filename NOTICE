@@ -15,6 +15,9 @@ Changes made in this fork:
     reasoning streams;
   - added `framing.js`, which provides background pan/zoom framing and
     sidebar/interface transparency controls;
+  - isolated composer frosting on a decorative material layer, preserving
+    fixed overlay coordinates, and selected input surfaces using the Host's
+    explicit data-composer-card marker instead of scanning draft geometry;
   - rebranded the package, plugin id and installer from beauticode-* to dsh-bg.
 
 The bundled theme in `themes/internal-beyond` keeps its own NOTICE.md.

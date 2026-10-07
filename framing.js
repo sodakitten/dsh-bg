@@ -815,12 +815,25 @@ html[data-bc-resolved-tone="light"][data-bc-active="true"] body > [class*="_card
   background-image:none !important;
 }
 
-/* The composer card is found at runtime (see tagComposerSurface) because its
-   class name is not reachable from here: the seat is a full-width wrapper and
-   the stack's first child is a 0x0 unclassed node. Blurring the backdrop of the
-   card alone hides the transcript scrolling behind it without touching the
-   page's transparency, and without touching the strip around the card. */
+/* Follow the host MenuSurface material pattern: filter a decoration, never the
+   card that owns inputs, menus and fixed overlays. Filtering the card creates a
+   fixed-position containing block and a backdrop root. Model selection/focus
+   can then move overlays and scroll them into view. Isolation only orders the
+   material behind the content; it does not change fixed-position coordinates. */
 [data-bgc-composer="1"]{
+  position:relative;
+  isolation:isolate;
+  -webkit-backdrop-filter:none;
+  backdrop-filter:none;
+  background-color:transparent !important;
+}
+[data-bgc-composer="1"]::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  border-radius:inherit;
+  pointer-events:none;
   -webkit-backdrop-filter:blur(28px);
   backdrop-filter:blur(28px);
   /* Frosted glass rather than a white plate: a strong blur is what makes a glyph
@@ -1927,47 +1940,45 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
   // The element currently carrying the frost. Kept until it stops being valid, so
   // the tag cannot hop between the card and a wrapper inside it on every re-scan.
   let frostedEl = null;
-  let lastAreaSize = -1;
-
   function tagComposerSurface() {
     const area =
       document.querySelector('[class*="_composerSeat"]') ??
       document.querySelector('[class*="_composerStack"]');
-    if (!area) return;
+    const select = (next) => {
+      if (next === frostedEl && next?.dataset.bgcComposer === "1") return;
+      for (const el of document.querySelectorAll('[data-bgc-composer="1"]')) {
+        if (el !== next) delete el.dataset.bgcComposer;
+      }
+      if (next) next.dataset.bgcComposer = "1";
+      frostedEl = next;
+    };
+    if (!area) { select(null); return; }
 
-    // The gate is the AREA, not the target.
-    //
-    // Gating on the target kept the frost on a node that was no longer the card. The
-    // composer stack survives a question with its children removed, and entering the
-    // selection state swaps which element is the card — both are recorded elsewhere in
-    // this file. Either way the card lost its frost, which reads as transparent.
-    //
-    // Counting the area's descendants is a walk, not a layout read, so the gate stays
-    // as cheap as it was. An unchanged count means nothing in the area changed shape
-    // and the current choice stands. A changed count means re-decide — and 5.3.3's
-    // outermost-only rule makes re-deciding return one stable element, so this no
-    // longer hops.
-    const areaSize = area.querySelectorAll("*").length;
-    if (
-      frostedEl &&
-      frostedEl.isConnected &&
-      area.contains(frostedEl) &&
-      frostedEl.dataset.bgcComposer === "1" &&
-      areaSize === lastAreaSize
-    ) {
+    // The official InputBar publishes this marker in normal, hero and Claude
+    // provider sessions. Text, attachments and model-label changes must never
+    // reselect a different surface or force geometry reads of all its children.
+    const card = area.querySelector('[data-composer-card]');
+    if (card) { select(card); return; }
+
+    // Asking a question replaces the composer. Retain a question surface only
+    // while it is still in this seat. Inline menus/overlays are never surfaces.
+    if (frostedEl?.isConnected && area.contains(frostedEl) &&
+        !frostedEl.hasAttribute('data-composer-card') &&
+        !frostedEl.closest('[role="menu"],[role="listbox"],[data-trigger-menu],[data-menu-material]')) {
       return;
     }
-    lastAreaSize = areaSize;
     const candidates = [];
     for (const el of area.querySelectorAll("*")) {
+      if (el.closest('[role="menu"],[role="listbox"],[data-trigger-menu],[data-menu-material]')) continue;
+      const style = getComputedStyle(el);
+      if (style.position === "fixed" || style.display === "none" || style.visibility === "hidden") continue;
       const rect = el.getBoundingClientRect();
       if (rect.height < 40 || rect.width < 160) continue;
-      const style = getComputedStyle(el);
       if (style.backgroundColor === "rgba(0, 0, 0, 0)") continue;
       if (parseFloat(style.borderRadius) <= 0) continue;
       candidates.push({ el, width: rect.width });
     }
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) { select(null); return; }
     const widest = Math.max(...candidates.map((c) => c.width));
     const qualifying = candidates.filter((c) => c.width >= widest * 0.6);
 
@@ -1983,14 +1994,7 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       (c) => !qualifying.some((other) => other !== c && other.el.contains(c.el)),
     );
     const chosen = outermost.reduce((a, b) => (a && a.width >= b.width ? a : b));
-    const next = new Set([chosen.el]);
-    for (const el of document.querySelectorAll('[data-bgc-composer="1"]')) {
-      if (!next.has(el)) delete el.dataset.bgcComposer;
-    }
-    for (const el of next) {
-      if (el.dataset.bgcComposer !== "1") el.dataset.bgcComposer = "1";
-      frostedEl = el;
-    }
+    select(chosen.el);
   }
 
   /* ---------------------------------------------------- native caption strip */
