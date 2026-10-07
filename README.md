@@ -2,8 +2,10 @@
 
 给 **DeepSeek Harness** 用的本地背景插件：图片 / 视频壁纸、画面裁切、界面透明度、背景轮播。
 
-当前版本 **5.6.9**，已验证环境为 Windows 官方桌面端 **DSH 0.2.0-rc.2 / Electron 44**。
+当前版本 **5.6.10**，已验证环境为 Windows 官方桌面端 **DSH 0.2.0-rc.2 / Electron 44**。
 DSH 0.2.1-alpha.1 尚未完成兼容性验证。
+
+5.6.10 将“雨中百合”和“深色百合”补入 **已保存的背景 → 图片**，与“画窗”一样可直接点击使用，标记为内置且不提供删除。轮播选项与已有轮播条目同步采用中文名，保留原有内部 ID，无需迁移轮播配置。图片计数、当前使用标记与刷新后的选中状态均包含这两套预设；切换不创建重复的用户背景记录。
 
 5.6.9 修复输入卡片磨砂会改变内部固定浮层定位的问题。磨砂改为独立、不接收鼠标事件的装饰层，沿用 DSH 原生 MenuSurface 的材质结构；输入、附件与模型选择不再触发整张输入卡片的几何扫描或磨砂目标切换。保留草稿、附件和原生滚动行为。浏览器回归测试见 `tools/composer-surface-test.cjs`。
 
@@ -120,7 +122,7 @@ dsh plugin --profile desktop add "file:C:/plugins/dsh-bg"
 更新时推荐使用带版本号的独立 TGZ，避免相同本地目录依赖被包管理器缓存为旧内容：
 
 ```powershell
-dsh plugin --profile desktop add "file:C:/plugins/dsh-bg-5.6.8.tgz"
+dsh plugin --profile desktop add "file:C:/plugins/dsh-bg-5.6.10.tgz"
 ```
 
 上述路径是示例，请替换为实际位置。开发者可在仓库中运行 `npm pack` 生成 TGZ。

@@ -1426,8 +1426,8 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
 
   const CAROUSEL_URL = '/__beauticode/ui/carousel';
   const CAROUSEL_PRESETS = [
-    { id: 'internal', name: 'Internal' },
-    { id: 'infernal', name: 'Infernal' },
+    { id: 'internal', name: '雨中百合' },
+    { id: 'infernal', name: '深色百合' },
   ];
 
   let carouselState = null;    // last snapshot from the host

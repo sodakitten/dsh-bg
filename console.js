@@ -9,6 +9,13 @@
     { id: "image", label: "图片" },
     { id: "video", label: "视频" },
   ];
+  // These presets ship with the plugin but are deliberately not user-saved
+  // themes. Offer them here as well as in the carousel, using the existing
+  // preset apply route so no duplicate files or persisted themes are created.
+  const BUILTIN_PRESETS = [
+    { id: "builtin-internal", name: "雨中百合", preset: "internal", type: "image", bundled: true },
+    { id: "builtin-infernal", name: "深色百合", preset: "infernal", type: "image", bundled: true },
+  ];
   let themeCategory = "image";
   let themeCategoryPinned = false;
   // One dialog has to offer both kinds, so the accept list carries both. Every
@@ -437,6 +444,8 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
       currentThemeId = data.identity.slice("theme:".length);
     } else if (data.atmosphere === "gallery") {
       currentThemeId = "builtin-gallery";
+    } else if (BUILTIN_PRESETS.some((entry) => entry.preset === data.atmosphere)) {
+      currentThemeId = BUILTIN_PRESETS.find((entry) => entry.preset === data.atmosphere).id;
     } else {
       currentThemeId = "";
     }
@@ -444,7 +453,12 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     soundBtn.classList.toggle("on", !muted);
     soundBtn.textContent = muted ? "已关" : "已开";
     soundBtn.setAttribute("aria-pressed", muted ? "false" : "true");
-    const themes = Array.isArray(data.themes) ? data.themes : [];
+    const savedThemes = Array.isArray(data.themes) ? data.themes : [];
+    const themes = [
+      ...savedThemes.filter((theme) => theme.bundled),
+      ...BUILTIN_PRESETS.filter((preset) => !savedThemes.some((theme) => theme.id === preset.id)),
+      ...savedThemes.filter((theme) => !theme.bundled),
+    ];
     if (themes.length === 0) {
       themesBox.hidden = true;
       themeList.innerHTML = "";
@@ -891,11 +905,12 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     const item = event.target.closest("[data-theme-id]");
     if (!item) return;
     const targetThemeId = item.getAttribute("data-theme-id") || "";
+    const preset = BUILTIN_PRESETS.find((entry) => entry.id === targetThemeId);
     void run(async () => {
-      const result = await request("/__beauticode/ui/theme/use", {
+      const result = await request(preset ? "/__beauticode/ui/preset" : "/__beauticode/ui/theme/use", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: targetThemeId }),
+        body: JSON.stringify({ id: preset ? preset.preset : targetThemeId }),
       });
       currentThemeId = targetThemeId;
       globalThis.BeauticodeAtmosphere?.setWindowMode?.(

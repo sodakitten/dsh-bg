@@ -7,13 +7,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const ATMOSPHERE_PRESETS = Object.freeze({
   internal: Object.freeze({
     id: "internal",
-    name: "Internal",
+    name: "雨中百合",
     file: "bg-internal.jpg",
     tone: "light",
   }),
   infernal: Object.freeze({
     id: "infernal",
-    name: "Infernal",
+    name: "深色百合",
     file: "bg-infernal.jpg",
     tone: "dark",
   }),
