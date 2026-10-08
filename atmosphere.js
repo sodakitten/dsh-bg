@@ -119,27 +119,27 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
   }
 
   function attachWater(canvas) {
-    const dpr = () => Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     let sim = null;
     let output = null;
-    let work = null;
     let last = null;
+    let rect = null, pointer = null, awakeUntil = 0, painted = false;
 
     function sizeSim() {
       const width = Math.max(32, canvas.clientWidth || window.innerWidth || 1);
       const height = Math.max(32, canvas.clientHeight || window.innerHeight || 1);
-      const pixel = dpr();
-      canvas.width = Math.round(width * pixel);
-      canvas.height = Math.round(height * pixel);
       const simWidth = Math.max(80, Math.min(420, Math.round(width / 4)));
       const simHeight = Math.max(45, Math.round(simWidth * (height / width)));
+      // CSS scales the same ripple texture. Allocating a full-window DPR canvas
+      // only redrew millions of identical interpolated pixels on every frame.
+      canvas.width = simWidth;
+      canvas.height = simHeight;
+      rect = canvas.getBoundingClientRect();
       sim = createWaterSim(simWidth, simHeight);
       output = null;
-      work = null;
+      pointer = last = null; painted = false; awakeUntil = 0;
     }
 
     function localPoint(event) {
-      const rect = canvas.getBoundingClientRect();
       if (!rect.width || !rect.height || !sim) return null;
       return {
         x: ((event.clientX - rect.left) / rect.width) * sim.width,
@@ -148,6 +148,14 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     }
 
     function follow(event) {
+      if (event.target?.closest?.('[role="dialog"][aria-modal="true"]')) return;
+      pointer = {clientX:event.clientX,clientY:event.clientY};
+      awakeUntil = performance.now() + 5000;
+    }
+
+    function applyPointer() {
+      const event = pointer; pointer = null;
+      if (!event) return;
       if (!sim) return;
       const point = localPoint(event);
       if (!point) return;
@@ -169,8 +177,19 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
 
     function render() {
       if (!sim) return;
-      sim.step(0.033);
+      const now = performance.now();
+      if (now >= awakeUntil) {
+        if (painted) {
+          canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
+          sim = createWaterSim(sim.width,sim.height);
+        }
+        painted = false; last = null;
+        return;
+      }
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) { pointer = last = null; return; }
       const ctx = canvas.getContext("2d");
+      applyPointer();
+      sim.step(0.033);
       if (!output) output = ctx.createImageData(sim.width, sim.height);
       const dest = output.data;
       const heights = sim.heights();
@@ -187,28 +206,18 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
             dest[di] = 224;
             dest[di + 1] = 238;
             dest[di + 2] = 255;
-            dest[di + 3] = alpha > 110 ? 110 : alpha;
+            dest[di + 3] = Math.min(110,alpha) * Math.min(1,(awakeUntil-now)/500);
           } else {
             alpha = -alpha;
             dest[di] = 8;
             dest[di + 1] = 16;
             dest[di + 2] = 32;
-            dest[di + 3] = alpha > 90 ? 90 : alpha;
+            dest[di + 3] = Math.min(90,alpha) * Math.min(1,(awakeUntil-now)/500);
           }
         }
       }
-      if (!work) {
-        work = document.createElement("canvas");
-        work.width = sim.width;
-        work.height = sim.height;
-      }
-      work.getContext("2d").putImageData(output, 0, 0);
-      const pixel = dpr();
-      ctx.setTransform(pixel, 0, 0, pixel, 0, 0);
-      ctx.imageSmoothingEnabled = true;
-      if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = "high";
-      ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-      ctx.drawImage(work, 0, 0, canvas.clientWidth, canvas.clientHeight);
+      ctx.putImageData(output, 0, 0);
+      painted = true;
     }
 
     sizeSim();

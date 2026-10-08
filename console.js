@@ -261,6 +261,10 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   let dialogEl = null;
   let pageActive = false;
   let lastStatus = null;
+  let statusRequest = null;
+  let statusAgain = false;
+  let selectionRevision = 0;
+  let themesMarkup = null;
 
   // The shadow is always a real percentage: an untouched profile reads the same
   // 0% the stylesheet falls back to, so the slider, the label and the veil can
@@ -462,6 +466,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     if (themes.length === 0) {
       themesBox.hidden = true;
       themeList.innerHTML = "";
+      themesMarkup = null;
       themeCount.textContent = "";
       return;
     }
@@ -471,7 +476,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     const active = themes.find((theme) => theme.id === currentThemeId);
     if (!themeCategoryPinned && active) themeCategory = categoryOfTheme(active);
     const visible = themes.filter((theme) => categoryOfTheme(theme) === themeCategory);
-    themeList.innerHTML = visible
+    const markup = visible
       .map((theme) => {
         const del =
           theme.bundled === true
@@ -489,6 +494,13 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
         return `<div class="bc-theme-row"><button type="button" class="bc-theme-item" data-theme-id="${escapeAttr(theme.id)}"${current}><span class="bc-theme-name">${escapeText(theme.name)}</span><span class="bc-source">${source}</span>${dot}</button>${del}</div>`;
       })
       .join("");
+    if (markup !== themesMarkup) {
+      themesMarkup = markup;
+      themeList.innerHTML = markup;
+    }
+    // A status response may arrive mid-switch and create new controls.
+    for (const button of pageControls()) button.disabled = busy;
+    syncImportControls();
     themeCount.textContent = String(visible.length);
     for (const tab of themeTabs) {
       const on = tab.dataset.category === themeCategory;
@@ -557,12 +569,23 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     }
   }
 
-  async function refresh() {
-    try {
-      renderStatus(await request("/__beauticode/ui/status"));
-    } catch (error) {
-      renderStatus({ ok: false, error: error instanceof Error ? error.message : String(error) });
-    }
+  function refresh() {
+    if (statusRequest) { statusAgain = true; return statusRequest; }
+    const work = (async () => {
+      do {
+        statusAgain = false;
+        const revision = selectionRevision;
+        try {
+          const data = await request("/__beauticode/ui/status", undefined, {timeoutMs:5000});
+          if (revision === selectionRevision) renderStatus(data);
+          else statusAgain = true;
+        } catch (error) {
+          if (revision === selectionRevision) renderStatus({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        }
+      } while (statusAgain && !busy);
+    })().finally(() => { if (statusRequest === work) statusRequest = null; });
+    statusRequest = work;
+    return work;
   }
 
   function pageControls() {
@@ -574,6 +597,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   async function run(task) {
     if (busy) return;
     busy = true;
+    selectionRevision++;
     page.dataset.busy = "true";
     let afterRun = null;
     for (const button of pageControls()) button.disabled = true;
@@ -595,7 +619,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
       } else {
         showMessage("");
       }
-      await refresh();
+      // A read-only status refresh must not keep all action controls locked.
     } catch (error) {
       showMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -604,6 +628,7 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
       for (const button of pageControls()) button.disabled = false;
       syncImportControls();
     }
+    void refresh();
     if (afterRun) queueMicrotask(afterRun);
   }
 
@@ -858,7 +883,9 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
   if (!backgroundChangeBound) {
     backgroundChangeBound = true;
     document.addEventListener("bgc:background-changed", () => {
-      if (pageActive) void refresh();
+      if (!pageActive) return;
+      if (busy) statusAgain = true;
+      else void refresh();
     });
   }
   renderFullscreen();
@@ -905,6 +932,9 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
     const item = event.target.closest("[data-theme-id]");
     if (!item) return;
     const targetThemeId = item.getAttribute("data-theme-id") || "";
+    // Re-clicking the green-dot entry does not need another disk transaction,
+    // decoder warm-up, or gallery handover.
+    if (targetThemeId === currentThemeId && lastStatus?.ok) return;
     const preset = BUILTIN_PRESETS.find((entry) => entry.id === targetThemeId);
     void run(async () => {
       const result = await request(preset ? "/__beauticode/ui/preset" : "/__beauticode/ui/theme/use", {
