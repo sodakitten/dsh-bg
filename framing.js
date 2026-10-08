@@ -343,10 +343,14 @@
     el.style.setProperty("inset", "auto");
     el.style.setProperty("left", "50%");
     el.style.setProperty("top", "50%");
-    el.style.setProperty("width", `${m.wPct.toFixed(4)}%`);
-    el.style.setProperty("height", `${m.hPct.toFixed(4)}%`);
-    // The box aspect now equals the image aspect, so `cover` fills it exactly and
-    // can never distort; it only guards against percentage rounding.
+    // Cover percentages + centering can land between device pixels (Windows
+    // 125%/150% scaling, odd viewport sizes, pan limits). Give each edge one
+    // physical pixel of coverage so raster rounding cannot expose the stage.
+    const coverage = 2 / Math.max(1, window.devicePixelRatio || 1);
+    el.style.setProperty("width", `calc(${m.wPct.toFixed(4)}% + ${coverage}px)`);
+    el.style.setProperty("height", `calc(${m.hPct.toFixed(4)}% + ${coverage}px)`);
+    // `cover` preserves the image aspect through the tiny coverage margin,
+    // rather than stretching it to the rounded media box.
     el.style.setProperty("object-fit", "cover");
     el.style.setProperty("transform-origin", "center center");
     el.style.setProperty(
@@ -951,6 +955,13 @@ html[data-bc-gallery="true"] #beauticode-gallery-bg::after{
 }
 html[data-bc-resolved-tone="light"][data-bc-gallery="true"] #beauticode-gallery-bg::after{
   background:rgba(255,255,255,var(--bc-dim,0));
+}
+/* When 画窗 reuses the stage image, that stage owns blur and dim. The water
+   layer must not apply them a second time. */
+html[data-bc-gallery-stage] #beauticode-gallery-bg::before,
+html[data-bc-gallery-stage] #beauticode-gallery-bg::after{
+  content:none!important;
+  backdrop-filter:none!important;
 }
 
 html[data-bc-active="true"] [role="dialog"][aria-modal="true"]{

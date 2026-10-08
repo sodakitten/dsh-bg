@@ -913,9 +913,8 @@ div[role="dialog"][aria-modal="true"][data-bc-page="on"] nav button[aria-current
         body: JSON.stringify({ id: preset ? preset.preset : targetThemeId }),
       });
       currentThemeId = targetThemeId;
-      globalThis.BeauticodeAtmosphere?.setWindowMode?.(
-        currentThemeId === "builtin-gallery" ? "on" : "closed",
-      );
+      // The bridge owns renderer handover after decode; do not start a second
+      // gallery load from this settings response.
       return result;
     });
   });

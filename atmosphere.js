@@ -71,11 +71,12 @@
       document.head.append(style);
     }
     style.textContent = `
-#beauticode-gallery-bg{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:#0b1018}
+#beauticode-gallery-bg{position:fixed;inset:-1px;z-index:0;overflow:hidden;pointer-events:none;background:#0b1018}
+#beauticode-gallery-bg[data-bc-stage="true"]{background:transparent}
 #beauticode-gallery-bg img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center center;display:block;pointer-events:none;z-index:0;image-rendering:auto;-webkit-backface-visibility:hidden}
 #beauticode-gallery-bg canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;mix-blend-mode:soft-light;opacity:.32}
-html[data-bc-gallery="true"] #beauticode-bg-stage{background:transparent!important}
-html[data-bc-gallery="true"] #beauticode-bg-stage::after{display:none!important;background:transparent!important}
+html[data-bc-gallery="true"]:not([data-bc-gallery-stage]) #beauticode-bg-stage{background:transparent!important}
+html[data-bc-gallery="true"]:not([data-bc-gallery-stage]) #beauticode-bg-stage::after{display:none!important;background:transparent!important}
 html[data-bc-gallery="true"],html[data-bc-gallery="true"] body{background:transparent!important}
 html[data-bc-gallery="true"] body{
   --dsw-alias-bg-base:rgba(17,20,27,.10);
@@ -93,8 +94,8 @@ html[data-bc-resolved-tone="light"][data-bc-gallery="true"] body{
 }
 html[data-bc-gallery="true"] #root{position:relative;z-index:1;background:transparent!important}
 html[data-bc-gallery="true"] [class*="_sidebarCol"] [class*="_fade"]:empty{display:none!important}
-html[data-bc-gallery="true"] #beauticode-bg-stage img,
-html[data-bc-gallery="true"] #beauticode-bg-stage video{opacity:0!important}
+html[data-bc-gallery="true"]:not([data-bc-gallery-stage]) #beauticode-bg-stage img,
+html[data-bc-gallery="true"]:not([data-bc-gallery-stage]) #beauticode-bg-stage video{opacity:0!important}
 html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
 `;
     return style;
@@ -106,6 +107,8 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     token: 0,
     loop: 0,
     lastTick: 0,
+    pending: null,
+    cancelPending: null,
   };
 
   function stopLoop() {
@@ -235,18 +238,21 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
   }
 
   function closeLayer() {
+    runtime.token += 1;
+    runtime.cancelPending?.();
+    runtime.cancelPending = null;
+    runtime.pending = null;
     stopLoop();
     runtime.layer?.water?.destroy();
     runtime.layer?.node.remove();
     runtime.layer = null;
+    delete document.documentElement.dataset.bcGalleryStage;
     markPage(false);
   }
 
-  async function openLayer() {
+  async function openLayer(sourceImage) {
     const token = (runtime.token += 1);
     ensureStyle();
-    closeLayer();
-    markPage(true);
     const node = document.createElement("div");
     node.id = ROOT_ID;
     node.setAttribute("aria-hidden", "true");
@@ -256,24 +262,48 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     image.fetchPriority = "high";
     image.draggable = false;
     const canvas = document.createElement("canvas");
-    node.append(image, canvas);
-    document.body.prepend(node);
-
-    await new Promise((resolve) => {
-      image.onload = resolve;
-      image.onerror = resolve;
-      image.src = CANVAS_URL;
+    const reuseStage = sourceImage?.isConnected && sourceImage.naturalWidth > 0 &&
+      Boolean(sourceImage.closest('#beauticode-bg-stage'));
+    if (reuseStage) {
+      node.dataset.bcStage = 'true';
+      node.append(canvas);
+    } else node.append(image, canvas);
+    // Prepare off screen. Never hide the committed background before decode.
+    const ready = reuseStage || await new Promise((resolve) => {
+      let done = false;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        image.onload = image.onerror = null;
+        if (runtime.cancelPending === cancel) runtime.cancelPending = null;
+        if (!ok) image.removeAttribute('src');
+        resolve(ok);
+      };
+      const cancel = () => finish(false);
+      const timer = setTimeout(() => finish(false), 8000);
+      runtime.cancelPending = cancel;
+      image.onload = () => {
+        Promise.resolve(image.decode?.()).then(() => finish(image.naturalWidth > 0), () => finish(false));
+      };
+      image.onerror = () => finish(false);
+      // Standalone fallback only. Normal bridge applies keep the already
+      // decoded image in its stage and add just the water canvas above it.
+      image.src = sourceImage?.currentSrc || sourceImage?.src || CANVAS_URL;
     });
-    if (token !== runtime.token || runtime.windowMode === "closed") {
+    if (!ready || token !== runtime.token || runtime.windowMode === "closed") {
       node.remove();
+      if (token === runtime.token) runtime.windowMode = 'closed';
       return;
     }
-
+    document.body.prepend(node);
     const water = attachWater(canvas);
     runtime.layer = { node, water };
+    if (reuseStage) document.documentElement.dataset.bcGalleryStage = 'true';
+    markPage(true);
     const tick = (ts) => {
       if (!runtime.layer) return;
-      if (ts - runtime.lastTick > 32) {
+      if (document.visibilityState !== 'hidden' && ts - runtime.lastTick > 32) {
         runtime.lastTick = ts;
         water.render();
       }
@@ -282,12 +312,26 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     runtime.loop = requestAnimationFrame(tick);
   }
 
-  function setWindowMode(mode) {
+  function setWindowMode(mode, sourceImage) {
     const next = mode === "on" || mode === "window" || mode === "full" ? "on" : "closed";
     runtime.windowMode = next;
-    if (next === "closed") closeLayer();
-    else void openLayer();
-    return next;
+    if (next === "closed") {
+      closeLayer();
+      return Promise.resolve(next);
+    }
+    if (runtime.layer) return Promise.resolve(next);
+    if (runtime.pending) return runtime.pending;
+    const pending = openLayer(sourceImage).then(() => runtime.windowMode).catch(() => {
+      if (runtime.pending === pending) {
+        runtime.windowMode = 'closed';
+        closeLayer();
+      }
+      return runtime.windowMode;
+    }).finally(() => {
+      if (runtime.pending === pending) runtime.pending = null;
+    });
+    runtime.pending = pending;
+    return pending;
   }
 
   function getState() {

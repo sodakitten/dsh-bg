@@ -151,7 +151,7 @@ html[data-bc-resolved-tone="light"][data-bc-active="true"]:has(#root [data-phase
   --dsw-alias-bg-layer-2:rgba(248,250,252,.82);
   --dsw-alias-bg-overlay:rgba(255,255,255,.86);
 }
-#beauticode-bg-stage{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:#11141b}
+#beauticode-bg-stage{position:fixed;inset:-1px;z-index:0;overflow:hidden;pointer-events:none;background:#11141b}
 #beauticode-bg-stage::after{content:"";position:absolute;inset:0;z-index:3;background:transparent;pointer-events:none}
 html[data-bc-resolved-tone="light"] #beauticode-bg-stage{background:#f8fafc}
 /* The background shadow defaults to zero, so the wallpaper keeps its own
@@ -180,12 +180,14 @@ html[data-bc-resolved-tone="light"][data-bc-dim-user="true"][data-bc-active="tru
 html[data-bc-dim-user="true"][data-bc-active="true"] #beauticode-bg-stage::after{background:rgba(0,0,0,var(--bc-dim))!important}
 html[data-bc-resolved-tone="light"][data-bc-dim-user="true"][data-bc-active="true"] #beauticode-bg-stage::after{background:rgba(255,255,255,var(--bc-dim))!important}
 html[data-bc-fish="true"] #beauticode-bg-stage::after{background:transparent!important}
-#beauticode-bg-stage .beauticode-media-slot{position:absolute;inset:0;z-index:0;opacity:1;overflow:hidden;pointer-events:none;transition:opacity ${CROSSFADE_MS}ms ease;will-change:opacity}
+#beauticode-bg-stage .beauticode-media-slot{position:absolute;inset:0;z-index:0;opacity:1;overflow:hidden;pointer-events:none;transition:opacity ${CROSSFADE_MS}ms ease}
 #beauticode-bg-stage .beauticode-media-slot[data-bc-role="current"]{z-index:1;opacity:1}
-#beauticode-bg-stage .beauticode-media-slot[data-bc-role="candidate"]{z-index:2;opacity:1}
+#beauticode-bg-stage .beauticode-media-slot[data-bc-role="candidate"]{z-index:2;opacity:0;will-change:opacity}
+/* A video still warms behind the opaque current slot; Chromium can defer a
+   completely invisible decoder. Its poster remains the commit boundary. */
+#beauticode-bg-stage .beauticode-media-slot[data-bc-role="candidate"][data-bc-media="video"]{z-index:0;opacity:1}
 #beauticode-bg-stage[data-bc-empty="true"] .beauticode-media-slot[data-bc-role="candidate"]{z-index:1}
-#beauticode-bg-stage[data-bc-transitioning="true"] .beauticode-media-slot[data-bc-role="current"]{opacity:0}
-#beauticode-bg-stage[data-bc-transitioning="true"] .beauticode-media-slot[data-bc-role="candidate"]{opacity:1}
+#beauticode-bg-stage[data-bc-transitioning="true"] .beauticode-media-slot[data-bc-role="candidate"]{z-index:2;opacity:1}
 #beauticode-bg-stage .beauticode-media-slot img,#beauticode-bg-stage .beauticode-media-slot video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;transition:opacity 120ms ease}
 #beauticode-bg-stage .beauticode-media-slot img{z-index:2;opacity:1}
 /* Keep cold candidate video paintable. Chromium may defer decoding media that
@@ -1509,14 +1511,24 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
       document.visibilityState === "visible" &&
       remainingMs() > CROSSFADE_MS + FRAME_FALLBACK_MS * 2 + 250;
     if (canAnimate) {
+      // A cold video was paintable behind the old slot. Once its poster is
+      // decoded, move it above at zero opacity, then fade only the incoming
+      // slot; fading both exposes the flat stage during the overlap.
+      slot.style.transition = 'none';
+      slot.style.opacity = '0';
+      slot.style.zIndex = '2';
       await nextFrame(signal);
       await nextFrame(signal);
       throwIfAborted(signal);
+      slot.style.removeProperty('transition');
       node.dataset.bcTransitioning = "true";
-      await waitForCrossfade(previous, signal);
+      slot.style.removeProperty('opacity');
+      await waitForCrossfade(slot, signal);
     }
     throwIfAborted(signal);
     if (previous && previous !== slot) disposeSlot(previous);
+    if (!canAnimate) slot.style.transition = 'none';
+    slot.style.removeProperty('z-index');
     slot.dataset.bcRole = "current";
     node.removeAttribute("data-bc-transitioning");
     node.removeAttribute("data-bc-empty");
@@ -1525,7 +1537,7 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     const video = activeVideo();
     playbackBlocked = video?.dataset?.bcPlaybackBlocked === "true";
     updateCommittedDom(payload, slot.dataset.bcVideoReady === "true");
-    syncGallery(payload);
+    await syncGallery(payload);
   }
 
   function restoreCommittedDom() {
@@ -1543,11 +1555,12 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
     document.documentElement.removeAttribute("data-bc-video-ready");
   }
 
-  function syncGallery(payload) {
+  async function syncGallery(payload) {
     const on = payload?.atmosphere?.preset === "gallery";
     try {
-      const sync = globalThis.BeauticodeAtmosphere?.setWindowMode?.(on ? "on" : "closed");
-      if (sync && typeof sync.then === "function") void sync.catch(() => {});
+      await globalThis.BeauticodeAtmosphere?.setWindowMode?.(
+        on ? "on" : "closed", mountedCurrentSlot()?.querySelector('img'),
+      );
     } catch {
       /* Atmosphere is optional and must never invalidate a rendered background. */
     }
@@ -1567,7 +1580,7 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
       committedPayload = payload;
       document.getElementById("beauticode-bg-stage")?.remove();
       updateCommittedDom(payload);
-      syncGallery(payload);
+      await syncGallery(payload);
       if (document.documentElement.dataset.bcGallery === "true") {
         document.documentElement.dataset.bcActive = "true";
       }
@@ -1611,7 +1624,7 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
       currentSlot.dataset.bcImageUrl = payload.imageUrl;
       if (payload.videoUrl) currentSlot.dataset.bcVideoUrl = payload.videoUrl;
       updateCommittedDom(payload);
-      syncGallery(payload);
+      await syncGallery(payload);
       await acknowledgeRender(payload, true, true);
       await acknowledgeMode();
       return;
