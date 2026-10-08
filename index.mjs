@@ -8,6 +8,7 @@ import { resolvePluginBaseUrl } from "./host-apply.mjs";
 import { createBeauticodeUi } from "./ui-host.mjs";
 import { canvasImagePath, iceFrostImagePath, normalizeAtmosphere } from "./presets.mjs";
 import { createBrowserInjection } from "./browser-injection.mjs";
+import { createWindowBorder } from "./window-border.mjs";
 
 export const name = "bg";
 export const inject = ["webServer"];
@@ -202,6 +203,10 @@ export function apply(ctx, config = {}) {
   const tokenFile = path.resolve(config.tokenFile || defaultTokenFile());
   const clients = new Map();
   const clientStates = new Map();
+  const windowBorder = createWindowBorder();
+  const updateWindowBorder = () => windowBorder.setHidden(
+    current?.media !== "clear" && [...clientStates.values()].some(state => state.windowBorder === true),
+  );
   let current = null;
   const modes = { fish: false, muted: true, tone: "auto" };
   const dataRoot = path.dirname(tokenFile);
@@ -480,6 +485,7 @@ export function apply(ctx, config = {}) {
             if (clients.get(clientId) === res) {
               clients.delete(clientId);
               clientStates.delete(clientId);
+              updateWindowBorder();
             }
           });
         },
@@ -512,6 +518,7 @@ export function apply(ctx, config = {}) {
           if (atmosphere) current.atmosphere = atmosphere;
           if (body.media === "clear") modes.fish = false;
           for (const state of clientStates.values()) state.render = null;
+          updateWindowBorder();
           broadcast({ type: "apply", ...current });
           if (body.media === "clear") broadcast({ type: "mode", ...modes });
           sendJson(res, 200, { ok: true });
@@ -561,7 +568,7 @@ export function apply(ctx, config = {}) {
             sendJson(res, 401, { ok: false, error: "未授权的请求。" });
             return;
           }
-          sendJson(res, 200, publicStatus(current, modes, clients, clientStates));
+          sendJson(res, 200, { ...publicStatus(current, modes, clients, clientStates), nativeWindowBorder: windowBorder.status });
         },
       }),
       // Same-origin render/mode receipt from the injected browser client —
@@ -581,6 +588,11 @@ export function apply(ctx, config = {}) {
           const state = clientStates.get(body.clientId);
           if (!clients.has(body.clientId) || !state) {
             sendJson(res, 400, { ok: false, error: "渲染回执无效。" });
+            return;
+          }
+          if ((body.desktopWindows !== undefined && typeof body.desktopWindows !== "boolean") ||
+              (body.nativeBorderHidden !== undefined && typeof body.nativeBorderHidden !== "boolean")) {
+            sendJson(res, 400, { ok: false, error: "窗口边缘回执无效。" });
             return;
           }
           if (body.kind === "render") {
@@ -651,6 +663,8 @@ export function apply(ctx, config = {}) {
             sendJson(res, 400, { ok: false, error: "回执类型无效。" });
             return;
           }
+          state.windowBorder = body.desktopWindows === true && body.nativeBorderHidden === true;
+          updateWindowBorder();
           sendJson(res, 200, { ok: true });
         },
       }),
@@ -662,6 +676,7 @@ export function apply(ctx, config = {}) {
       for (const response of clients.values()) response.destroy();
       clients.clear();
       clientStates.clear();
+      windowBorder.dispose();
       void ui.dispose();
     };
   }, "bg: routes and browser injection");

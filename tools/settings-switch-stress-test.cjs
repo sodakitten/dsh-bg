@@ -5,14 +5,14 @@ const {chromium}=require('playwright');
 const root=process.env.BG_SOURCE_ROOT||path.join(__dirname,'..');
 const scripts=['atmosphere.js','client.js','console.js','framing.js'].map(f=>fs.readFileSync(path.join(root,f),'utf8'));
 let page,active=null,generation=0,statusCount=0,postCount=0,statusDelay=0,failNext=false;
-const receipt=new Map(),errors=[];
+const receipt=new Map(),errors=[],acks=[];
 const themes=[{id:'builtin-gallery',name:'画窗',type:'image',bundled:true},...Array.from({length:6},(_,i)=>({id:'saved'+i,name:'图片'+i,type:'image',sourceMode:'managed'}))];
 const snapshot=()=>({ok:true,muted:true,atmosphere:active==='builtin-gallery'?'gallery':active==='builtin-internal'?'internal':active==='builtin-infernal'?'infernal':null,themeId:active?.startsWith('saved')?active:null,themes,importPolicy:{managedUploadAllowed:false}});
 const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url,'http://localhost');res.setHeader('content-type','application/json');
   if(url.pathname==='/__beauticode/ui/status'){statusCount++;const data=snapshot();await new Promise(r=>setTimeout(r,statusDelay));res.end(JSON.stringify(data));return;}
   if(url.pathname==='/__beauticode/ui/carousel'){res.end(JSON.stringify({ok:true,groups:[],activeGroupId:null}));return;}
-  if(url.pathname==='/__beauticode/ack'){let raw='';for await(const c of req)raw+=c;const ack=JSON.parse(raw);if(ack.kind==='render'&&ack.ok)receipt.get(ack.generation)?.();res.end('{}');return;}
+  if(url.pathname==='/__beauticode/ack'){let raw='';for await(const c of req)raw+=c;const ack=JSON.parse(raw);acks.push(ack);if(ack.kind==='render'&&ack.ok)receipt.get(ack.generation)?.();res.end('{}');return;}
   if(url.pathname.endsWith('.svg')){res.setHeader('content-type','image/svg+xml');res.end('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><path fill="#246c5b" d="M0 0h600v400H0z"/></svg>');return;}
   if(req.method==='POST'){
     let raw='';for await(const c of req)raw+=c;const body=JSON.parse(raw);postCount++;await new Promise(r=>setTimeout(r,120));
@@ -50,5 +50,12 @@ try{
   check(await page.locator('[data-theme-id="builtin-gallery"]').getAttribute('aria-current')==='true','failed selection preserves the actually active background');
   check(await page.locator('.bc-theme-item:disabled').count()===0,'controls recover after a failed switch');
   check(errors.length===0,'combined plugin scripts report no client errors');
+  check(acks.length>0&&acks.every(a=>a.desktopWindows===false),'ordinary browser receipts cannot opt into Windows border changes');
+  const nextReceipt=async(action,test)=>{const start=acks.length;await action();const deadline=Date.now()+3000;while(Date.now()<deadline&&!acks.slice(start).some(test))await new Promise(r=>setTimeout(r,20));return acks.slice(start).some(test);};
+  check(await nextReceipt(()=>page.evaluate(()=>{window.dshDesktop={protocolVersion:1};Object.defineProperty(navigator,'platform',{configurable:true,value:'Win32'});document.dispatchEvent(new CustomEvent('bgc:settings-changed'));}),a=>a.desktopWindows&&a.nativeBorderHidden),'native desktop reports the default enabled edge policy');
+  check(await nextReceipt(()=>page.locator('[data-bgc-act="edge"]').click(),a=>a.desktopWindows&&!a.nativeBorderHidden),'edge switch off immediately reports native border restoration');
+  check(await nextReceipt(()=>page.locator('[data-bgc-act="edge"]').click(),a=>a.desktopWindows&&a.nativeBorderHidden),'edge switch on immediately reports native border suppression');
+  check(await nextReceipt(()=>page.evaluate(()=>sendBG({type:'apply',generation:500,media:'clear'})),a=>a.kind==='render'&&a.generation===500&&!a.nativeBorderHidden),'clearing background restores the native border policy');
+  check(errors.length===0,'native border receipt integration leaves the renderer error-free');
   console.log(passed+' integrated rapid selection checks passed');
 }finally{await browser.close();server.close();}})().catch(e=>{console.error(e);server.close();process.exitCode=1;});

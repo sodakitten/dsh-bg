@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { createWindowBorder } from '../window-border.mjs';
+let starts = [], writes = [], ended = 0;
+function fakeSpawn(command, args, options) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter(); child.stdin.writable = true;
+  child.stdin.write = line => writes.push(line);
+  child.stdin.end = () => { ended++; child.stdin.writable = false; };
+  starts.push({ command, args, options, child }); return child;
+}
+const browser = createWindowBorder({platform:'linux',spawnProcess:fakeSpawn});
+browser.setHidden(true); assert.equal(starts.length,0); browser.dispose();
+const desktop = createWindowBorder({platform:'win32',spawnProcess:fakeSpawn});
+desktop.setHidden(false); assert.equal(starts.length,0);
+desktop.setHidden(true);
+assert.equal(starts.length,1); assert.equal(starts[0].options.windowsHide,true);
+assert.deepEqual(starts[0].options.stdio,['pipe','pipe','pipe']);
+assert(starts[0].args.includes('-WindowStyle')); assert.equal(starts[0].args.at(-1),String(process.pid));
+assert.equal(writes.at(-1),'hide\n');
+for(let i=0;i<100;i++)desktop.setHidden(true);
+assert.equal(starts.length,1); assert.equal(writes.length,1);
+starts[0].child.stdout.emit('data','{"supported":true,"hidden":');
+starts[0].child.stdout.emit('data','true,"windows":1}\n');
+assert.equal(desktop.status.hidden,true); assert.equal(desktop.status.windows,1);
+desktop.setHidden(false); assert.equal(writes.at(-1),'show\n');
+desktop.setHidden(true); assert.equal(writes.at(-1),'hide\n');
+desktop.dispose(); desktop.dispose(); desktop.setHidden(true); assert.equal(ended,1); assert.equal(starts.length,1);
+starts[0].child.emit('exit',0); assert.equal(desktop.status.hidden,false);
+const failed = createWindowBorder({platform:'win32',spawnProcess:fakeSpawn});
+failed.setHidden(true); starts.at(-1).child.emit('error',new Error('Unavailable'));
+starts.at(-1).child.emit('exit',1);
+for(let i=0;i<100;i++)failed.setHidden(true);
+assert.equal(starts.length,2); assert.equal(failed.status.hidden,false); failed.dispose();
+console.log('PASS window border lifecycle: desktop-only, hidden process, coalescing, reports, restoration and failure isolation');

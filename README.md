@@ -2,14 +2,16 @@
 
 给 **DeepSeek Harness** 用的本地背景插件：图片 / 视频壁纸、画面裁切、界面透明度、背景轮播。
 
-当前版本 **5.6.12**，目标环境为 Windows 官方桌面端 **DSH 0.2.0-rc.2 / Electron 44**。
+当前版本 **5.6.13**，目标环境为 Windows 官方桌面端 **DSH 0.2.0-rc.2 / Electron 44**。
 DSH 0.2.1-alpha.1 尚未完成兼容性验证。
+
+5.6.13 补充 Windows 11 原生窗口描边处理。4K、200% 缩放会让系统细描边更明显，这一层位于网页背景之外，CSS 边缘覆盖无法消除。插件通过 [官方 DWM 接口](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute) 隐藏 DSH 主窗口描边，跟随默认开启的「磨砂边缘缝合」开关；关闭开关、清除背景、最后一个桌面客户端断开或停用插件时恢复系统默认。只识别当前 Host 的 DSH 桌面进程祖先及其主窗口，没有按标题搜索其它应用的回退路径，不改系统全局设置或 `app.asar`，保留窗口圆角、拖动、缩放和控制按钮。辅助进程以隐藏窗口方式启动，空闲不重复写入 DWM，跨屏 DPI 改变时重新应用。Windows 10 和网页端继续使用 CSS 缝合。新增隔离原生 DWM、辅助进程生命周期和 Host/Client 回执检查；未重启运行任务中的 DSH，因此真实 4K 桌面视觉效果仍需重启后确认。
 
 5.6.12 针对「已保存的背景」连续点击的卡顿继续修复：当前绿色标记背景重复点击不再执行磁盘切换；状态请求合并，旧响应不能覆盖新选择，相同列表不重建 DOM，处理中生成的控件继续禁用。只读状态刷新不再占着切换操作锁，最多等待 5 秒。画窗水纹直接绘制原有模拟分辨率纹理，避免每帧重画整个高分辨率窗口；鼠标位置合并到帧内处理，设置等模态窗口内暂停水纹绘制，停止操作 5 秒后渐隐并停止像素更新。`tools/settings-switch-stress-test.cjs` 同时运行实际设置、桥接、裁切和画窗脚本，覆盖 100 次重复点击、100 次状态信号、真实渲染回执、多次切换、失败恢复与绘制负担，共 10 项。5.6.11 在该重复点击检查中失败，当前版本通过；测试仍在独立本地页面进行，没有重启用户运行中的 DSH。
 
-5.6.11 修复 Windows 分数缩放下的背景边缘漏色：背景层向视口外延伸 1 CSS 像素，媒体在原裁切位置增加每边 1 物理像素覆盖。125% / 150% 缩放、奇数窗口尺寸和裁切边界均有像素回归检查。Windows 自身的原生窗口描边由桌面端管理，插件不修改其窗口实现。
+5.6.11 修复 Windows 分数缩放下的背景边缘漏色：背景层向视口外延伸 1 CSS 像素，媒体在原裁切位置增加每边 1 物理像素覆盖。125% / 150% 缩放、奇数窗口尺寸和裁切边界均有像素回归检查。5.6.13 另行处理 Windows 原生窗口描边，沿用官方 DWM 接口，不修改桌面端窗口实现。
 
-切换时保留旧背景，新图解码完成后才淡入，加载失败继续显示旧图；视频在旧背景后预热，再交接封面。画窗复用已解码的背景图片，重复开启复用同一个动画层，取消加载会清理待加载层，失败不留下灰色空层。测试见 `tools/background-switch-test.cjs`（18 项）与 `tools/background-edge-test.cjs`（8 项）；验证在独立本地浏览器页面进行，本版未重启正在运行任务的 DSH 做窗口实测。
+切换时保留旧背景，新图解码完成后才淡入，加载失败继续显示旧图；视频在旧背景后预热，再交接封面。画窗复用已解码的背景图片，重复开启复用同一个动画层，取消加载会清理待加载层，失败不留下灰色空层。测试见 `tools/background-switch-test.cjs`（18 项）与 `tools/background-edge-test.cjs`（16 项，含 4K 与 200% 缩放）；验证在独立本地浏览器页面进行，本版未重启正在运行任务的 DSH 做窗口实测。
 
 5.6.10 将“雨中百合”和“深色百合”补入 **已保存的背景 → 图片**，与“画窗”一样可直接点击使用，标记为内置且不提供删除。轮播选项与已有轮播条目同步采用中文名，保留原有内部 ID，无需迁移轮播配置。图片计数、当前使用标记与刷新后的选中状态均包含这两套预设；切换不创建重复的用户背景记录。
 
@@ -60,6 +62,7 @@ DSH 0.2.1-alpha.1 尚未完成兼容性验证。
 
 - 默认开启，同时适用于普通图片、视频及画窗预设；5.6.1 修复了普通背景开关无效和两侧白边。
 - 5.6.11 补充视口边缘覆盖，避免 Windows 125% / 150% 缩放时的细线；保留已有裁切配置。
+- 5.6.13 同时隐藏 Windows 11 的 DSH 主窗口原生描边，背景磨砂为 0 时也生效。关闭开关、清除背景或停用插件后恢复系统默认描边；不修改其它应用或系统主题设置。
 - 在媒体上方、界面下方模糊背景的可见区域，保留每张背景的裁切、平移及缩放，不通过额外放大图片隐藏边缘。
 - 背景磨砂为 0 时不生成模糊层；关闭缝合时恢复普通模糊，边缘可能重新变淡。轮播中的每个媒体槽独立处理，不改变切换与视频播放逻辑。
 
@@ -129,7 +132,7 @@ dsh plugin --profile desktop add "file:C:/plugins/dsh-bg"
 更新时推荐使用带版本号的独立 TGZ，避免相同本地目录依赖被包管理器缓存为旧内容：
 
 ```powershell
-dsh plugin --profile desktop add "file:C:/plugins/dsh-bg-5.6.12.tgz"
+dsh plugin --profile desktop add "file:C:/plugins/dsh-bg-5.6.13.tgz"
 ```
 
 上述路径是示例，请替换为实际位置。开发者可在仓库中运行 `npm pack` 生成 TGZ。
@@ -255,7 +258,19 @@ console.js             注入到页面：背景设置页的整体框架
 client.js / atmosphere.js / transport.js   上游的桥接与氛围层
 vendor/                DSH 适配器与核心（媒体服务、应用事务、存储）
 themes/                内置壁纸
+window-border.mjs / scripts/window-border.*   Windows 11 原生窗口描边处理
 ```
+
+5.6.13 的验证包含背景边缘像素 16 项（4K 与 100% / 150% / 200% / 250% 缩放）、真实脚本整合压力与桌面回执 16 项、背景切换 18 项、Host 窗口策略契约 10 项、隔离 Windows 原生 DWM 11 项，以及辅助进程与 Node 生命周期检查。所有原生测试只操作隐藏的测试窗口，未重启或修改运行中的 DSH 窗口。包白名单覆盖 51 个运行时文件。
+
+```powershell
+node tools/window-border-test.mjs
+node tools/window-border-host-test.mjs
+powershell -NoProfile -NonInteractive -File tools/window-border-native-test.ps1
+powershell -NoProfile -NonInteractive -File tools/window-border-helper-test.ps1 -NodePath "C:/path/to/node.exe"
+```
+
+浏览器检查需要 Playwright、pngjs 与 Microsoft Edge：`node tools/background-edge-test.cjs`、`node tools/settings-switch-stress-test.cjs`、`node tools/background-switch-test.cjs`。原生检查需要 Windows 11。
 
 5.6.8 的会话滚动条行为检查（`node tools/scrollbar-idle-test.cjs`，需要 Playwright、pngjs 和 Microsoft Edge）共 33 项：默认关闭、闲置隐藏与操作恢复、实时等待时间、重置与刷新后保存、关闭后恢复原生样式、正文宽度与内部滚动条不变、流式输出不重置计时、原生滚动条按住和拖动，以及淡入淡出中间状态、打断后平滑恢复、减少动态效果和原生滚动条截图像素的逐渐变化。还通过包清单与 JavaScript 语法检查。
 

@@ -547,6 +547,11 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
   // the clientId; it intentionally does not use authorized()/tokenFile,
   // which is reserved for /apply, /mode, /status.
   async function postAck(body) {
+    body = { ...body,
+      desktopWindows: globalThis.dshDesktop?.protocolVersion === 1 && globalThis.navigator?.platform === "Win32",
+      nativeBorderHidden: document.documentElement.dataset.bcActive === "true" &&
+        document.documentElement.dataset.bgcEdge === "fill",
+    };
     await fetch("/__beauticode/ack", {
       method: "POST",
       mode: "same-origin",
@@ -607,6 +612,8 @@ html[data-bc-fish="true"] #root{opacity:0!important;visibility:hidden!important;
       blocked: playbackBlocked,
     });
   }
+
+  document.addEventListener("bgc:settings-changed", () => { void acknowledgeMode().catch(() => {}); });
 
   function abortError() {
     try {

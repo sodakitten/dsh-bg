@@ -188,6 +188,7 @@
     if (settings.edgeFill) root.dataset.bgcEdge = "fill";
     else delete root.dataset.bgcEdge;
     scrollbarIdle?.configure(settings.scrollbarAutoHide, settings.scrollbarIdleSeconds * 1000);
+    document.dispatchEvent(new CustomEvent("bgc:settings-changed"));
   }
 
   /* ----------------------------------------------------- idle scrollbar */
@@ -1261,7 +1262,7 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
       "</div>" +
       '<div class="bc-row"><div class="bc-row-text">' +
       '<span class="bc-row-title">磨砂边缘缝合</span>' +
-      '<span class="bc-row-desc">模糊改由上层背板承担，窗口四边不再透出底色；只在背景磨砂大于 0 时有区别</span>' +
+      '<span class="bc-row-desc">防止背景边缘透出底色，同时隐藏 Windows 11 的窗口描边；关闭后恢复</span>' +
       "</div>" +
       '<div class="bc-control"><button type="button" class="bc-btn bc-pill" data-bgc-act="edge" aria-pressed="false">已关</button></div>' +
       "</div>" +
