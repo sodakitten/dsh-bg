@@ -42,9 +42,9 @@ const server=http.createServer((req,res)=>{
       await page.waitForTimeout(230);await page.locator('#portal-menu').evaluate(el=>el.remove());
       const now=await state();check(now.tag==='card'&&now.x===initial.x&&now.y===initial.y&&now.h===initial.h&&now.scroll===initial.scroll&&now.windowScroll===0&&now.htmlHeight===800&&now.text===initial.text,'model selection '+i+' preserves card, draft and scrolling');
     }
-    await page.evaluate(()=>{const card=document.getElementById('card');card.remove();document.querySelector('.native_composerStack').innerHTML='<div id="question">Question card<button>Answer</button></div>';});await page.waitForTimeout(300);
-    check(await page.locator('#question').getAttribute('data-bgc-composer')==='1','question replacement keeps a single frosted surface');
-    await page.evaluate(()=>document.getElementById('question').remove());await page.waitForTimeout(300);
+    await page.evaluate(()=>{const card=document.getElementById('card');card.remove();document.querySelector('.native_composerStack').innerHTML='<div data-question-key="test"><div id="question" class="native_card">Question card<button>Answer</button></div></div>';});await page.waitForTimeout(300);
+    check(await page.locator('[data-bgc-composer="1"]').count()===0&&await page.locator('#question').evaluate(el=>getComputedStyle(el).backgroundColor==='rgb(248, 250, 252)'),'question replacement uses its own solid theme surface');
+    await page.evaluate(()=>document.querySelector('[data-question-key]').remove());await page.waitForTimeout(300);
     check(await page.locator('[data-bgc-composer="1"]').count()===0,'empty seat clears old surface');
     await page.evaluate(()=>document.querySelector('.native_composerStack').innerHTML='<div id="restored" data-composer-card><div data-composer-input contenteditable>Restored draft</div><button>Model B</button></div>');await page.waitForTimeout(300);
     check(await page.locator('#restored').getAttribute('data-bgc-composer')==='1','returning composer reuses host marker');

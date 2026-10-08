@@ -847,6 +847,24 @@ html[data-bc-resolved-tone="light"][data-bc-active="true"] body > [class*="_card
   background-color:color-mix(in srgb, rgb(var(--bgc-rgb-base,248,250,252)) 55%, transparent) !important;
 }
 
+/* Pending questions and plan reviews replace the input card, but sit over the
+   transcript. Their legibility must not depend on a backdrop-filter texture
+   surviving window deactivation. Use the host's interaction markers, before
+   any observer/geometry scan runs, and paint a solid theme surface directly.
+   No filter or pseudo layer on these interactive cards: fixed descendants keep
+   their viewport coordinates, and the background remains when blur is absent. */
+html[data-bc-active="true"] :is([data-question-key],[data-plan-review-key]) > [class*="_card"]{
+  background-color:var(--dsw-static-neutral-bluish-900,#11141b) !important;
+  -webkit-backdrop-filter:none !important;
+  backdrop-filter:none !important;
+}
+html[data-bc-resolved-tone="light"][data-bc-active="true"] :is([data-question-key],[data-plan-review-key]) > [class*="_card"]{
+  background-color:var(--dsw-static-neutral-bluish-50,#f8fafc) !important;
+}
+html[data-bc-active="true"] :is([data-question-key],[data-plan-review-key]) > [class*="_card"][data-bgc-composer="1"]::before{
+  content:none !important;
+}
+
 /* Dropdown menus. DSH defines --dsw-specific-menu for them, with a near-opaque
    fallback (#f8f9faf0). beautiCode redirects it to var(--dsw-alias-bg-layer-3) — its
    own comment in client.js says so — which puts menus on the panel tier,
@@ -1936,13 +1954,11 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
     if (button && button.dataset.bgcSidebarAccount !== "1") button.dataset.bgcSidebarAccount = "1";
   }
   /**
-   * Tag the composer card — the composer card normally, the question card while
-   * DSH is asking something.
+   * Tag the composer card. Pending host questions/reviews have a separate solid
+   * surface, selected by semantic markers in CSS rather than by geometry.
    *
-   * The search runs over the SEAT: with a question on screen the composer stack
-   * is still present but empty, so searching it found nothing at all, and the
-   * input itself is removed from the DOM, so walking up from it has no chain to
-   * climb. The seat holds whichever of the two is currently rendered.
+   * The seat holds the current interaction and may retain an empty input stack.
+   * Check pending interaction markers first; the input itself can be absent.
    *
    * The width floor is relative to the widest candidate rather than to the
    * container: a seat-relative ratio excluded the 680px question card inside a
@@ -1966,14 +1982,20 @@ html[data-bc-active="true"][data-windows-titlebar] [class*="_centerCol"]{
     };
     if (!area) { select(null); return; }
 
+    // Questions/reviews can coexist with an empty or retained input stack. They
+    // must never inherit the input's transparent background and cached frost.
+    if (area.querySelector('[data-question-key],[data-plan-review-key]')) {
+      select(null); return;
+    }
+
     // The official InputBar publishes this marker in normal, hero and Claude
     // provider sessions. Text, attachments and model-label changes must never
     // reselect a different surface or force geometry reads of all its children.
     const card = area.querySelector('[data-composer-card]');
     if (card) { select(card); return; }
 
-    // Asking a question replaces the composer. Retain a question surface only
-    // while it is still in this seat. Inline menus/overlays are never surfaces.
+    // Unknown/older host surfaces retain the previous fallback only while they
+    // remain in this seat. Inline menus/overlays are never surfaces.
     if (frostedEl?.isConnected && area.contains(frostedEl) &&
         !frostedEl.hasAttribute('data-composer-card') &&
         !frostedEl.closest('[role="menu"],[role="listbox"],[data-trigger-menu],[data-menu-material]')) {
